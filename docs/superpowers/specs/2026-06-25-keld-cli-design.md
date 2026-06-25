@@ -49,13 +49,19 @@ read of telemetry data. The CLI only manages local onboarding.
   raw Click (more boilerplate), argparse (poor ergonomics).*
 - **HTTP:** httpx.
 - **Output:** rich (Typer-integrated) for diffs, tables, spinners.
-- **TOML:** tomlkit (format- and comment-preserving — required so the
-  `# >>> keld` / `# <<< keld` managed-block markers survive round-trips in
-  `~/.codex/config.toml`).
+- **TOML:** stdlib `tomllib` for validation; the Codex managed block
+  (`# >>> keld` / `# <<< keld`) is built and stripped as a delimited text
+  region, so no third-party TOML writer is needed.
 - **JSON:** stdlib `json` with stable key ordering and 2-space indent.
-- **Packaging:** uv + hatchling build backend, published to PyPI. Primary
-  install path: `uv tool install keld` / `uvx keld`. Console entry point:
-  `keld = keld.cli:app`.
+- **Packaging:** hatchling build backend, published to **PyPI**. The single
+  PyPI artifact supports pip, pipx, and uvx simultaneously. **Documented
+  default install: `pipx install keld`** — isolated and reliable on every
+  platform, and it sidesteps the `externally-managed-environment` (PEP 668)
+  failure that bare `pip install` hits on modern distros (Manjaro, Debian,
+  macOS/Homebrew). `pip install keld` (inside a venv) and `uvx keld` /
+  `uv tool install keld` are documented alternatives. All runtime
+  dependencies are pure-Python wheels (no compiled parts), so isolation is the
+  only consideration. Console entry point: `keld = keld.cli:main`.
 
 ## 3. Provider-Agnostic Tool Adapters
 
@@ -89,7 +95,7 @@ class ToolAdapter(Protocol):
 | Format | Tools | How Keld-managed entries are marked |
 | --- | --- | --- |
 | JSON | Claude Code, Gemini CLI | Telemetry env keys are well-known `OTEL_*` / `CLAUDE_CODE_ENABLE_TELEMETRY` names; hook entries identified by their `command` referencing `keld-context.py`. A `_keld` sentinel object records the managed key list for unambiguous removal. |
-| TOML | Codex | Keld block wrapped in `# >>> keld` / `# <<< keld` comment delimiters via tomlkit; hook array entries identified by command path. |
+| TOML | Codex | Keld block wrapped in `# >>> keld` / `# <<< keld` comment delimiters, built and stripped as a delimited text region (stdlib `tomllib` validates the result); hook array entries live inside that block. |
 
 JSON and TOML adapters share deep-merge helpers in `config/merge.py` but differ
 only in the marker mechanism above.
@@ -181,7 +187,7 @@ The manifest is the source of truth that makes `uninstall` precise and
 
 ```
 keld-cli/
-  pyproject.toml            # uv/hatchling; entry point: keld = keld.cli:app
+  pyproject.toml            # hatchling; entry point: keld = keld.cli:main
   README.md
   src/keld/
     cli.py                  # Typer app; registers subcommands
