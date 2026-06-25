@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import tomllib
+
+from ..errors import KeldError
 
 
 def load_json(text: str | None) -> dict:
@@ -56,3 +59,46 @@ def remove_hooks_by_command(obj: dict, substr: str) -> None:
             del hooks[event]
     if not hooks:
         obj.pop("hooks", None)
+
+
+KELD_TOML_START = "# >>> keld (managed by keld CLI — do not edit between markers)"
+KELD_TOML_END = "# <<< keld"
+
+
+def has_keld_block(text: str | None) -> bool:
+    return bool(text) and KELD_TOML_START in text
+
+
+def strip_keld_block(text: str | None) -> str:
+    if not text or KELD_TOML_START not in text:
+        return text or ""
+    lines = text.splitlines()
+    out: list[str] = []
+    inside = False
+    for line in lines:
+        if line.strip() == KELD_TOML_START:
+            inside = True
+            continue
+        if inside and line.strip() == KELD_TOML_END:
+            inside = False
+            continue
+        if not inside:
+            out.append(line)
+    result = "\n".join(out).rstrip("\n")
+    return result + "\n" if result else ""
+
+
+def upsert_keld_block(text: str | None, body: str) -> str:
+    base = strip_keld_block(text)
+    body = body if body.endswith("\n") else body + "\n"
+    block = f"{KELD_TOML_START}\n{body}{KELD_TOML_END}\n"
+    if not base.strip():
+        return block
+    return base + "\n" + block
+
+
+def validate_toml(text: str) -> None:
+    try:
+        tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise KeldError(f"resulting TOML is invalid: {exc}") from exc
