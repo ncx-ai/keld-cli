@@ -48,7 +48,7 @@ def _run_setup(adapters, params: SetupParams, client: AtlasClient, ob: Onboardin
                 console.print("  [dim](dry-run: would be skipped)[/]")
                 continue
             if yes:
-                console.print(f"  [yellow]skipped[/] (--yes)")
+                console.print("  [yellow]skipped[/] (--yes)")
                 continue
             if resolve_conflict(adapter, plan):
                 console.print("  [yellow]skipped[/]")

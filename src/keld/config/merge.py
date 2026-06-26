@@ -9,7 +9,10 @@ from ..errors import KeldError
 def load_json(text: str | None) -> dict:
     if not text or not text.strip():
         return {}
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise KeldError(f"existing config is not valid JSON: {exc}") from exc
 
 
 def dump_json(obj: dict) -> str:

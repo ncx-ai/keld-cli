@@ -65,11 +65,12 @@ def test_conflict_abort_writes_nothing(keld_home, monkeypatch, tmp_path):
     monkeypatch.setattr(CodexAdapter, "config_path", lambda self: codex_cfg)
 
     import typer
-    with pytest.raises(typer.Exit):
+    with pytest.raises(typer.Exit) as exc_info:
         _run_setup([ClaudeAdapter(), CodexAdapter()], PARAMS, _client(), OB,
                    dry_run=False, yes=False,
                    confirm=lambda msg: True,
                    resolve_conflict=lambda adapter, plan: False)  # abort
+    assert exc_info.value.exit_code == 1
     assert not claude_cfg.exists()                 # nothing written
     assert Manifest.load().tools == {}
 
@@ -95,3 +96,23 @@ def test_yes_auto_skips_conflict(keld_home, monkeypatch, tmp_path):
     manifest = _run_setup([ClaudeAdapter(), CodexAdapter()], PARAMS, _client(), OB,
                           dry_run=False, yes=True)
     assert "claude_code" in manifest.tools and "codex" not in manifest.tools
+
+
+def test_malformed_json_treated_as_conflict_not_crash(keld_home, monkeypatch, tmp_path):
+    cfg = tmp_path / ".claude" / "settings.json"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text("{ this is not valid json")
+    monkeypatch.setattr(ClaudeAdapter, "config_path", lambda self: cfg)
+    # --yes auto-skips conflicts; the run must not raise and must write nothing
+    manifest = _run_setup([ClaudeAdapter()], PARAMS, _client(), OB, dry_run=False, yes=True)
+    assert "claude_code" not in manifest.tools
+    assert cfg.read_text() == "{ this is not valid json"  # untouched
+
+
+def test_decline_final_confirm_writes_nothing(keld_home, monkeypatch, tmp_path):
+    cfg = tmp_path / ".claude" / "settings.json"
+    monkeypatch.setattr(ClaudeAdapter, "config_path", lambda self: cfg)
+    manifest = _run_setup([ClaudeAdapter()], PARAMS, _client(), OB,
+                          dry_run=False, yes=False, confirm=lambda msg: False)
+    assert not cfg.exists()
+    assert manifest.tools == {}

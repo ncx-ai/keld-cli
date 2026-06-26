@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+from pathlib import Path
 
 from .console import console
 
@@ -13,7 +14,7 @@ def diff_lines(before: str | None, after: str, label: str) -> list[str]:
     ))
 
 
-def render(before: str | None, after: str, label) -> None:
+def render(before: str | None, after: str, label: str | Path) -> None:
     for raw in diff_lines(before, after, str(label)):
         line = raw.rstrip("\n")
         if line.startswith("+") and not line.startswith("+++"):

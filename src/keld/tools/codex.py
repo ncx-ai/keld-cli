@@ -26,10 +26,9 @@ class CodexAdapter:
         after = upsert_keld_block(current_text, body)
         try:
             validate_toml(after)
-        except KeldError:
-            reason = ("your ~/.codex/config.toml already defines settings that "
-                      "conflict with Keld's (a duplicate [otel] table); "
-                      "Keld won't modify it.")
+        except KeldError as exc:
+            reason = (f"your ~/.codex/config.toml can't be safely modified by Keld "
+                      f"(it already defines conflicting settings, e.g. an [otel] table): {exc}")
             return Plan(
                 name=self.name, config_path=self.config_path(),
                 after_text=current_text or "", managed={}, summary=[],
