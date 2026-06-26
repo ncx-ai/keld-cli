@@ -39,6 +39,10 @@ def hook_path() -> Path:
     return keld_home() / "keld-context.py"
 
 
+def backups_dir() -> Path:
+    return keld_home() / "backups"
+
+
 def api_base() -> str:
     if _api_base_override is not None:
         return _api_base_override

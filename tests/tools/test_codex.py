@@ -1,8 +1,5 @@
 import tomllib
 
-import pytest
-
-from keld.errors import KeldError
 from keld.tools.base import SetupParams
 from keld.tools.codex import CodexAdapter
 
@@ -31,9 +28,11 @@ def test_apply_idempotent():
     assert first.after_text == second.after_text
 
 
-def test_apply_conflict_raises():
-    with pytest.raises(KeldError):
-        CodexAdapter().apply('[otel]\nenvironment = "dev"\n', P)
+def test_apply_conflict_returns_conflict_plan_not_raises():
+    plan = CodexAdapter().apply('[otel]\nenvironment = "dev"\n', P)
+    assert plan.conflict is not None
+    assert "otel" in plan.conflict.lower()
+    assert plan.changed is False
 
 
 def test_status():

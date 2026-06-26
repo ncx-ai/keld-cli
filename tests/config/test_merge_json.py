@@ -12,6 +12,13 @@ def test_load_empty():
     assert load_json('{"a": 1}') == {"a": 1}
 
 
+def test_load_json_malformed_raises_keld_error():
+    import pytest
+    from keld.errors import KeldError
+    with pytest.raises(KeldError):
+        load_json("{ not json")
+
+
 def test_dump_is_stable_and_newline_terminated():
     assert dump_json({"a": 1}) == '{\n  "a": 1\n}\n'
 

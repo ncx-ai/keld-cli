@@ -12,6 +12,7 @@ from keld.cli import app
 from keld.config.manifest import Manifest
 from keld.paths import hook_path
 from keld.tools.claude import ClaudeAdapter
+from keld.tools.codex import CodexAdapter
 
 runner = CliRunner()
 
@@ -83,3 +84,21 @@ def test_signal_setup_api_url_flag_targets_dev_server(keld_home, monkeypatch, tm
     )
     assert result.exit_code == 0, result.output
     assert _FakeClient.last_base_url == "http://localhost:8000"
+
+
+def test_signal_setup_conflict_skip_via_cli(keld_home, monkeypatch, tmp_path):
+    from keld.tools.codex import CodexAdapter
+    claude_cfg = tmp_path / ".claude" / "settings.json"
+    codex_cfg = tmp_path / ".codex" / "config.toml"
+    codex_cfg.parent.mkdir(parents=True)
+    codex_cfg.write_text('[otel]\nx = 1\n')   # conflicts
+    _patch_wrappers(monkeypatch, claude_cfg)
+    monkeypatch.setattr(CodexAdapter, "config_path", lambda self: codex_cfg)
+
+    # CLI runner can't answer interactive prompts; --yes auto-skips the conflict.
+    result = runner.invoke(
+        app, ["signal", "setup", "--tool", "claude_code,codex", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert "claude_code" in Manifest.load().tools
+    assert "codex" not in Manifest.load().tools
+    assert codex_cfg.read_text() == '[otel]\nx = 1\n'   # untouched
