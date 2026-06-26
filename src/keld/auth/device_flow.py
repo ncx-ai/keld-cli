@@ -13,9 +13,13 @@ from .store import AuthData, load_auth, save_auth
 def login(client: AtlasClient, *, open_browser: bool = True,
           sleep=time.sleep, opener=webbrowser.open) -> AuthData:
     ds = client.device_start()
-    console.print(f"To authorize, visit [bold]{ds.verification_url}[/] "
-                  f"and enter code [bold]{ds.user_code}[/]")
+    console.print(
+        f"To authorize this device, open:\n  [bold]{ds.verification_url}[/]\n"
+        f"The code [bold]{ds.user_code}[/] is already filled in — "
+        f"confirm it matches, then approve."
+    )
     if open_browser:
+        console.print("(Opening your browser…)")
         opener(ds.verification_url)
 
     waited = 0
