@@ -41,3 +41,25 @@ def test_strip_removes_block_only():
 def test_validate_toml_raises_on_duplicate_table():
     with pytest.raises(KeldError):
         validate_toml('[otel]\na=1\n[otel]\nb=2\n')
+
+
+def test_strip_toml_table_removes_table_and_subtables():
+    from keld.config.merge import strip_toml_table
+    text = (
+        '[user]\nkeep = 1\n\n'
+        '[otel]\nenvironment = "dev"\n\n'
+        '[otel.exporter]\nx = 2\n\n'
+        '[other]\ny = 3\n'
+    )
+    out = strip_toml_table(text, "otel")
+    assert "[otel]" not in out
+    assert "[otel.exporter]" not in out
+    assert 'environment = "dev"' not in out
+    assert "[user]" in out and "keep = 1" in out
+    assert "[other]" in out and "y = 3" in out
+
+
+def test_strip_toml_table_absent_is_noop():
+    from keld.config.merge import strip_toml_table
+    text = '[user]\nx = 1\n'
+    assert strip_toml_table(text, "otel") == text
