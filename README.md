@@ -35,6 +35,20 @@ Keld product groups. Telemetry onboarding lives under the `keld signal` group.
 `--dry-run` (show changes only), `--yes` (skip confirmation),
 `--no-login` (fail instead of opening a browser, for CI).
 
+### Local development
+
+To point the CLI at a Keld server running locally, pass `--api-url` to `keld
+login` (or `keld signal setup`):
+
+```bash
+keld login --api-url http://localhost:8000   # auth against the local server
+keld signal setup                            # remembered — uses the same server
+```
+
+The chosen URL is stored with your credentials, so subsequent commands target it
+automatically. `--api-url` overrides the `KELD_API_URL` environment variable,
+which does the same thing if you prefer setting it in your shell.
+
 ## Authentication
 
 `keld` signs you in with a **browser-based device authorization** flow — you

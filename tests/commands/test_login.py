@@ -1,6 +1,7 @@
 from typer.testing import CliRunner
 
 import keld.commands.login as login_cmd
+from keld import paths
 from keld.auth.store import AuthData, save_auth
 from keld.cli import app
 
@@ -35,3 +36,12 @@ def test_login_invokes_require_auth(keld_home, monkeypatch):
     result = runner.invoke(app, ["login"])
     assert result.exit_code == 0
     assert called == {"no_login": False}
+
+
+def test_login_api_url_sets_override(keld_home, monkeypatch):
+    # `--api-url` makes the device flow (via api_base()) target the dev server.
+    monkeypatch.setattr(login_cmd, "require_auth",
+                        lambda **kw: AuthData("t", "p", "o", paths.api_base()))
+    result = runner.invoke(app, ["login", "--api-url", "http://localhost:8000/"])
+    assert result.exit_code == 0
+    assert paths.api_base() == "http://localhost:8000"

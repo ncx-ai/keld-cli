@@ -8,6 +8,7 @@ from ..config.manifest import Manifest, ToolManifest
 from ..config.writer import write_atomic
 from ..console import console
 from ..hook import install_hook
+from ..paths import api_base_override, set_api_base_override
 from ..tools.base import SetupParams
 from ..tools.registry import select_adapters
 
@@ -52,10 +53,15 @@ def setup(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show changes without writing."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
     no_login: bool = typer.Option(False, "--no-login", help="Fail instead of opening a browser."),
+    api_url: str = typer.Option(None, "--api-url", metavar="URL",
+                                help="Target a different Keld API base URL "
+                                     "(e.g. http://localhost:8000) for local dev."),
 ) -> None:
     """Configure detected tools for Keld telemetry."""
+    if api_url:
+        set_api_base_override(api_url)
     auth = require_auth(no_login=no_login)
-    client = AtlasClient(auth.api_url, token=auth.access_token)
+    client = AtlasClient(api_base_override() or auth.api_url, token=auth.access_token)
     ob = client.onboarding()
     names = [t.strip() for t in tool.split(",") if t.strip()] or None
     adapters = select_adapters(names)

@@ -17,10 +17,16 @@ runner = CliRunner()
 
 
 class _FakeClient:
-    """Stands in for AtlasClient so the CLI wrapper needs no live backend."""
+    """Stands in for AtlasClient so the CLI wrapper needs no live backend.
 
-    def __init__(self, *args, **kwargs):
-        pass
+    Records the base URL it was constructed with so tests can assert which
+    server `keld signal setup` targets.
+    """
+
+    last_base_url: str | None = None
+
+    def __init__(self, base_url=None, *args, **kwargs):
+        _FakeClient.last_base_url = base_url
 
     def onboarding(self):
         return Onboarding(
@@ -62,3 +68,18 @@ def test_signal_setup_then_uninstall_round_trip_via_cli(keld_home, monkeypatch, 
     assert not cfg.exists()  # config was Keld-created, now empty -> removed
     assert Manifest.load().tools == {}
     assert not hook_path().exists()
+
+
+def test_signal_setup_api_url_flag_targets_dev_server(keld_home, monkeypatch, tmp_path):
+    cfg = tmp_path / ".claude" / "settings.json"
+    _patch_wrappers(monkeypatch, cfg)
+    _FakeClient.last_base_url = None
+
+    # --api-url overrides the stored auth.api_url (https://atlas.keld.co) for this run.
+    result = runner.invoke(
+        app,
+        ["signal", "setup", "--tool", "claude_code", "--yes",
+         "--api-url", "http://localhost:8000"],
+    )
+    assert result.exit_code == 0, result.output
+    assert _FakeClient.last_base_url == "http://localhost:8000"
