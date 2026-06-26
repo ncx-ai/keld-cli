@@ -24,3 +24,9 @@ def test_status():
     plan = GeminiAdapter().apply(None, P)
     assert GeminiAdapter().status(plan.after_text, plan.managed).configured is True
     assert GeminiAdapter().status(None, None).configured is False
+
+
+def test_apply_accepts_replace_kwarg_noop():
+    a = GeminiAdapter().apply(None, P)
+    b = GeminiAdapter().apply(None, P, replace=True)
+    assert a.after_text == b.after_text

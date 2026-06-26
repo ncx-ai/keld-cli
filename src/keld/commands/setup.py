@@ -15,17 +15,19 @@ from ..tools.base import Plan, SetupParams
 from ..tools.registry import select_adapters
 
 
-def _default_resolve_conflict(adapter, plan) -> bool:
-    """Prompt for a conflicted tool. Returns True to skip it, False to abort."""
-    return typer.confirm(
-        f"Skip {adapter.display_name} and continue? (answering no aborts the whole run)",
-        default=True,
-    )
+def _default_resolve_conflict(adapter, plan) -> str:
+    """Prompt for a conflicted tool. Returns "skip", "replace", or "abort"."""
+    choice = typer.prompt(
+        f"{adapter.display_name}: [s]kip this tool, [r]eplace the conflicting "
+        f"section, or [a]bort everything?",
+        default="s",
+    ).strip().lower()[:1]
+    return {"s": "skip", "r": "replace", "a": "abort"}.get(choice, "skip")
 
 
 def _run_setup(adapters, params: SetupParams, client: AtlasClient, ob: Onboarding,
-               *, dry_run: bool, yes: bool, confirm=typer.confirm,
-               resolve_conflict=None) -> Manifest:
+               *, dry_run: bool, yes: bool, show_diff: bool = False,
+               confirm=typer.confirm, resolve_conflict=None) -> Manifest:
     if resolve_conflict is None:
         resolve_conflict = _default_resolve_conflict
 
@@ -33,34 +35,45 @@ def _run_setup(adapters, params: SetupParams, client: AtlasClient, ob: Onboardin
     for adapter in adapters:
         path = adapter.config_path()
         before = path.read_text() if path.exists() else None
+        console.rule(f"[bold]{adapter.display_name}[/] · {path}")
         try:
             plan = adapter.apply(before, params)
         except KeldError as exc:
             plan = Plan(name=adapter.name, config_path=path, after_text=before or "",
                         managed={}, summary=[], changed=False, conflict=str(exc))
 
-        console.print(f"\n[bold]{adapter.display_name}[/] · {plan.config_path}")
-
         if plan.conflict:
             console.print(f"  [yellow]conflict:[/] {plan.conflict}")
-            console.print(f"  [dim]resolve it and re-run, or skip {adapter.display_name} for now.[/]")
             if dry_run:
                 console.print("  [dim](dry-run: would be skipped)[/]")
                 continue
             if yes:
                 console.print("  [yellow]skipped[/] (--yes)")
                 continue
-            if resolve_conflict(adapter, plan):
-                console.print("  [yellow]skipped[/]")
+            choice = resolve_conflict(adapter, plan)
+            if choice == "abort":
+                console.print("Aborted.")
+                raise typer.Exit(code=1)
+            if choice == "replace":
+                plan = adapter.apply(before, params, replace=True)
+                if plan.conflict:
+                    console.print(f"  [yellow]can't replace:[/] {plan.conflict}")
+                    console.print("  [yellow]skipped[/]")
+                    continue
+                diffview.render(before, plan.after_text, plan.config_path)  # replace: always
+                for line in plan.summary:
+                    console.print(f"  [dim]{line}[/]")
+                approved.append((adapter, plan))
                 continue
-            console.print("Aborted.")
-            raise typer.Exit(code=1)
+            console.print("  [yellow]skipped[/]")
+            continue
 
         if not plan.changed:
             console.print("  already configured — no changes")
             continue
 
-        diffview.render(before, plan.after_text, plan.config_path)
+        if show_diff:
+            diffview.render(before, plan.after_text, plan.config_path)
         for line in plan.summary:
             console.print(f"  [dim]{line}[/]")
         approved.append((adapter, plan))
@@ -97,6 +110,7 @@ def _run_setup(adapters, params: SetupParams, client: AtlasClient, ob: Onboardin
 def setup(
     tool: str = typer.Option("", "--tool", help="Comma-separated tools to target."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show changes without writing."),
+    diff: bool = typer.Option(False, "--diff", help="Show full unified diffs (default: summary only)."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
     no_login: bool = typer.Option(False, "--no-login", help="Fail instead of opening a browser."),
     api_url: str = typer.Option(None, "--api-url", metavar="URL",
@@ -115,4 +129,4 @@ def setup(
         console.print("No supported tools detected. Use --tool to target one explicitly.")
         raise typer.Exit(code=0)
     params = SetupParams(endpoint=ob.endpoint, ingest_token=ob.ingest_token, actor=ob.actor)
-    _run_setup(adapters, params, client, ob, dry_run=dry_run, yes=yes)
+    _run_setup(adapters, params, client, ob, dry_run=dry_run, yes=yes, show_diff=diff)

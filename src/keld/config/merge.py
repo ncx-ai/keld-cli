@@ -105,3 +105,23 @@ def validate_toml(text: str) -> None:
         tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         raise KeldError(f"resulting TOML is invalid: {exc}") from exc
+
+
+def strip_toml_table(text: str, table: str) -> str:
+    """Remove a top-level [table] (and its [table.sub] subtables) from raw TOML
+    text, preserving all other content. No-op if the table is absent.
+
+    Walks lines tracking the current top-level table (first dotted segment of
+    the most recent [header]/[[header]]); drops lines while it equals `table`.
+    """
+    out: list[str] = []
+    dropping = False
+    for line in text.splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped.startswith("["):
+            header = stripped.strip("[]").strip()
+            top = header.split(".", 1)[0].strip().strip('"').strip("'")
+            dropping = top == table
+        if not dropping:
+            out.append(line)
+    return "".join(out)

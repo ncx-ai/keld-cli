@@ -45,3 +45,9 @@ def test_status_reports_configured():
     assert st.configured is True
     st_empty = ClaudeAdapter().status(None, None)
     assert st_empty.configured is False
+
+
+def test_apply_accepts_replace_kwarg_noop():
+    a = ClaudeAdapter().apply(None, P)
+    b = ClaudeAdapter().apply(None, P, replace=True)
+    assert a.after_text == b.after_text

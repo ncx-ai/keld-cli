@@ -21,7 +21,7 @@ class ClaudeAdapter:
     def detect(self) -> bool:
         return self.config_path().parent.exists()
 
-    def apply(self, current_text: str | None, params: SetupParams) -> Plan:
+    def apply(self, current_text: str | None, params: SetupParams, *, replace: bool = False) -> Plan:
         obj = load_json(current_text)
         env_keys = merge_env(obj, t.claude_env(params))
         command = t.hook_command(str(hook_path()))

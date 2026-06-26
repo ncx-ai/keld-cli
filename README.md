@@ -35,13 +35,15 @@ Keld product groups. Telemetry onboarding lives under the `keld signal` group.
 `--dry-run` (show changes only), `--yes` (skip confirmation),
 `--no-login` (fail instead of opening a browser, for CI).
 
-`setup` is interactive: it shows a unified diff of the exact changes to each
-config file, then asks before writing. If a tool's config already has settings
-Keld can't safely merge (e.g. Codex with its own `[otel]` section), setup
-explains the conflict and lets you skip that tool or abort — the other tools
-still get configured. Every file Keld modifies is first copied to
-`~/.keld/backups/<tool>/`. Use `--dry-run` to preview without writing and
-`--yes` to skip prompts (conflicts are auto-skipped in that mode).
+`setup` is interactive. By default it prints a concise summary of the changes to
+each config file; pass `--diff` to see the full unified diff. If a tool's config
+already has settings Keld can't safely merge (e.g. Codex with its own `[otel]`
+section), setup explains the conflict and lets you **[s]kip** that tool,
+**[r]eplace** just the conflicting section with Keld's (the rest of your config
+is preserved, and the diff is always shown for a replace), or **[a]bort**. Every
+file Keld modifies is first copied to `~/.keld/backups/<tool>/`. Use `--dry-run`
+to preview without writing and `--yes` to skip prompts (conflicts are
+auto-skipped in that mode).
 
 ### Local development
 
