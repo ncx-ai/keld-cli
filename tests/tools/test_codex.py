@@ -39,3 +39,19 @@ def test_status():
     plan = CodexAdapter().apply(None, P)
     assert CodexAdapter().status(plan.after_text, plan.managed).configured is True
     assert CodexAdapter().status("[user]\nx=1\n", None).configured is False
+
+
+def test_apply_replace_resolves_conflict_and_preserves_other():
+    cfg = '[user]\nfoo = "bar"\n\n[otel]\nenvironment = "dev"\n'
+    plan = CodexAdapter().apply(cfg, P, replace=True)
+    assert plan.conflict is None
+    assert plan.changed is True
+    assert "# >>> keld" in plan.after_text          # Keld block inserted
+    assert 'environment = "dev"' not in plan.after_text  # old [otel] removed
+    assert "[user]" in plan.after_text and 'foo = "bar"' in plan.after_text  # preserved
+    tomllib.loads(plan.after_text)                  # valid TOML (single [otel])
+
+
+def test_apply_replace_without_conflict_is_normal():
+    plan = CodexAdapter().apply(None, P, replace=True)
+    assert plan.conflict is None and plan.changed is True

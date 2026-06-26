@@ -17,7 +17,7 @@ class GeminiAdapter:
     def detect(self) -> bool:
         return self.config_path().parent.exists()
 
-    def apply(self, current_text: str | None, params: SetupParams) -> Plan:
+    def apply(self, current_text: str | None, params: SetupParams, *, replace: bool = False) -> Plan:
         obj = load_json(current_text)
         obj["telemetry"] = gemini_telemetry(params)
         after = dump_json(obj)
