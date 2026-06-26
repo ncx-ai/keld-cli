@@ -32,6 +32,7 @@ def test_uninstall_restores_user_config(keld_home, monkeypatch, tmp_path):
     assert json.loads(cfg.read_text()) == {"env": {"MY": "1"}, "model": "opus"}
     assert not hook_path().exists()
     assert Manifest.load().tools == {}
+    assert not (cfg.parent / (cfg.name + ".keld.bak")).exists()
 
 
 def test_uninstall_decline_keeps_config(keld_home, monkeypatch, tmp_path):

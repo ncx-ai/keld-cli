@@ -31,6 +31,9 @@ def _run_uninstall(manifest: Manifest, names: list[str] | None,
             pass
         else:
             write_atomic(path, plan.after_text, backup=False)
+        bak = path.with_name(path.name + ".keld.bak")
+        if bak.exists():
+            bak.unlink()
         del manifest.tools[name]
         console.print(f"  [green]✓[/] {adapter.display_name}")
 
@@ -39,6 +42,8 @@ def _run_uninstall(manifest: Manifest, names: list[str] | None,
             hook_path().unlink()
         if manifest.hook:
             manifest.hook = None
+        manifest.endpoint = None
+        manifest.actor = None
     manifest.save()
     console.print("Done.")
 

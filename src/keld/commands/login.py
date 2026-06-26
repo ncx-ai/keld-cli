@@ -4,6 +4,7 @@ import typer
 
 from ..auth.device_flow import require_auth
 from ..auth.store import clear_auth, load_auth
+from ..config.manifest import Manifest
 from ..console import console, fail
 
 
@@ -27,4 +28,6 @@ def whoami() -> None:
     auth = load_auth()
     if auth is None:
         fail("not logged in (run `keld login`)")
-    console.print(f"[bold]{auth.principal}[/] · org {auth.org} · {auth.api_url}")
+    endpoint = Manifest.load().endpoint
+    suffix = f" · endpoint {endpoint}" if endpoint else ""
+    console.print(f"[bold]{auth.principal}[/] · org {auth.org} · {auth.api_url}{suffix}")

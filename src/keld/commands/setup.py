@@ -5,7 +5,7 @@ import typer
 from ..api.client import AtlasClient, Onboarding
 from ..auth.device_flow import require_auth
 from ..config.manifest import Manifest, ToolManifest
-from ..config.writer import delete_if_empty, write_atomic
+from ..config.writer import write_atomic
 from ..console import console
 from ..hook import install_hook
 from ..tools.base import SetupParams
@@ -37,10 +37,7 @@ def _run_setup(adapters, params: SetupParams, client: AtlasClient, ob: Onboardin
     manifest.hook = record
 
     for adapter, plan in zip(adapters, plans):
-        if plan.managed.get("created") and delete_if_empty(plan.config_path, plan.after_text):
-            pass
-        else:
-            write_atomic(plan.config_path, plan.after_text, backup=True)
+        write_atomic(plan.config_path, plan.after_text, backup=True)
         manifest.tools[adapter.name] = ToolManifest(
             name=adapter.name, config_path=str(plan.config_path), managed=plan.managed)
         console.print(f"  [green]✓[/] {adapter.display_name}")

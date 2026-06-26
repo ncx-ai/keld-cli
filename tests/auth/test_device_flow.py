@@ -39,3 +39,15 @@ def test_require_auth_returns_stored(keld_home):
 def test_require_auth_no_login_raises(keld_home):
     with pytest.raises(KeldError):
         require_auth(no_login=True)
+
+
+def test_login_times_out(keld_home):
+    def handler(req):
+        if req.url.path.endswith("/device/start"):
+            return httpx.Response(200, json={"device_code": "dc", "user_code": "UC",
+                "verification_url": "https://atlas.keld.co/cli/device",
+                "interval": 0, "expires_in": 0})
+        return httpx.Response(202)
+
+    with pytest.raises(KeldError, match="timed out"):
+        login(client_with(handler), open_browser=False, sleep=lambda s: None)

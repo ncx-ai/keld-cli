@@ -3,6 +3,7 @@ import json
 from keld.api.client import AtlasClient, Onboarding
 from keld.commands.setup import _run_setup
 from keld.config.manifest import Manifest
+from keld.paths import manifest_path
 from keld.tools.base import SetupParams
 from keld.tools.claude import ClaudeAdapter
 import httpx
@@ -36,6 +37,7 @@ def test_dry_run_writes_nothing(keld_home, monkeypatch, tmp_path):
     monkeypatch.setattr(ClaudeAdapter, "config_path", lambda self: cfg)
     _run_setup([ClaudeAdapter()], PARAMS, _client(), OB, dry_run=True, yes=True)
     assert not cfg.exists()
+    assert not manifest_path().exists()
 
 
 def test_decline_confirmation_writes_nothing(keld_home, monkeypatch, tmp_path):
@@ -44,3 +46,4 @@ def test_decline_confirmation_writes_nothing(keld_home, monkeypatch, tmp_path):
     _run_setup([ClaudeAdapter()], PARAMS, _client(), OB,
                dry_run=False, yes=False, confirm=lambda msg: False)
     assert not cfg.exists()
+    assert not manifest_path().exists()

@@ -1,3 +1,5 @@
+import json
+
 from keld.config.merge import (
     load_json, dump_json, merge_env, remove_section_keys,
     add_claude_hook, remove_hooks_by_command, has_hook_with_command,
@@ -44,3 +46,19 @@ def test_remove_hooks_preserves_user_hooks():
     assert obj["hooks"]["SessionStart"] == [
         {"hooks": [{"type": "command", "command": "mine.sh"}]}
     ]
+
+
+def test_remove_hooks_by_command_removes_only_keld_entry():
+    # Event contains both a non-Keld hook and a Keld hook; only Keld entry is removed.
+    obj = {}
+    add_claude_hook(obj, "SessionStart", "user-matcher", "user-script.sh")
+    add_claude_hook(obj, "SessionStart", "keld-matcher", "python3 keld-context.py; true")
+    assert len(obj["hooks"]["SessionStart"]) == 2
+
+    remove_hooks_by_command(obj, "keld-context.py")
+
+    # Keld entry gone, user entry intact, hooks section still present
+    entries = obj["hooks"]["SessionStart"]
+    assert len(entries) == 1
+    assert entries[0]["matcher"] == "user-matcher"
+    assert "keld-context.py" not in json.dumps(entries)
