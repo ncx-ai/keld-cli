@@ -80,3 +80,4 @@ def test_apply_replace_refuses_when_strip_unsafe():
     plan = CodexAdapter().apply(cfg, P, replace=True)
     assert plan.conflict is not None
     assert plan.changed is False
+    assert "without affecting other settings" in plan.conflict
