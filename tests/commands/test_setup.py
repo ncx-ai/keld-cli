@@ -141,3 +141,30 @@ def test_malformed_json_treated_as_conflict_not_crash(keld_home, monkeypatch, tm
     manifest = _run_setup([ClaudeAdapter()], PARAMS, _client(), OB, dry_run=False, yes=True)
     assert "claude_code" not in manifest.tools
     assert cfg.read_text() == "{ this is not valid json"  # untouched
+
+
+def test_replace_skipped_when_strip_unsafe(keld_home, monkeypatch, tmp_path):
+    # A config whose multiline string contains an exact [otel] header line would
+    # be silently corrupted by the line-based stripper.  The safety check must
+    # cause the tool to be skipped and the file to remain untouched.
+    codex_cfg = tmp_path / ".codex" / "config.toml"
+    codex_cfg.parent.mkdir(parents=True)
+    unsafe_cfg = (
+        '[prompt]\n'
+        'text = """\n'
+        '[otel]\n'
+        'keep_me = 1\n'
+        '"""\n'
+        'tail = 2\n'
+        '\n'
+        '[otel]\n'
+        'environment = "dev"\n'
+    )
+    codex_cfg.write_text(unsafe_cfg)
+    monkeypatch.setattr(CodexAdapter, "config_path", lambda self: codex_cfg)
+    # resolve_conflict says "replace", but the safety check overrides it
+    manifest = _run_setup([CodexAdapter()], PARAMS, _client(), OB,
+                          dry_run=False, yes=False, confirm=lambda msg: True,
+                          resolve_conflict=lambda adapter, plan: "replace")
+    assert "codex" not in manifest.tools          # tool was skipped
+    assert codex_cfg.read_text() == unsafe_cfg    # file untouched

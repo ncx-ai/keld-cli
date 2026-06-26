@@ -55,3 +55,28 @@ def test_apply_replace_resolves_conflict_and_preserves_other():
 def test_apply_replace_without_conflict_is_normal():
     plan = CodexAdapter().apply(None, P, replace=True)
     assert plan.conflict is None and plan.changed is True
+
+
+def test_apply_replace_refuses_when_strip_unsafe():
+    # A multiline string containing an exact [otel] header line fools the
+    # line-based stripper: strip_toml_table will cut the string mid-way,
+    # producing corrupt TOML.  The safety check must catch this and refuse.
+    cfg = (
+        '[prompt]\n'
+        'text = """\n'
+        '[otel]\n'
+        'keep_me = 1\n'
+        '"""\n'
+        'tail = 2\n'
+        '\n'
+        '[otel]\n'
+        'environment = "dev"\n'
+    )
+    # Verify the input itself is valid TOML (the conflict is Keld's [otel], not the input).
+    parsed = tomllib.loads(cfg)
+    assert parsed["prompt"]["text"].startswith("[otel]")
+    assert parsed["otel"]["environment"] == "dev"
+
+    plan = CodexAdapter().apply(cfg, P, replace=True)
+    assert plan.conflict is not None
+    assert plan.changed is False
