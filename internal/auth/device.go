@@ -29,8 +29,8 @@ func Login(c *api.Client, openBrowser bool, sleep func(time.Duration), opener fu
 	if openBrowser {
 		console.Print("(Opening your browser…)")
 		// Best-effort: a headless/SSH/CI environment has no browser. The URL was
-		// already printed above, so the user can open it manually. Matches
-		// device_flow.py, which ignores the opener result. Do NOT abort login.
+		// already printed above, so the user can open it manually. The opener
+		// result is intentionally ignored — do NOT abort login on failure.
 		_ = opener(ds.VerificationURL)
 	}
 
