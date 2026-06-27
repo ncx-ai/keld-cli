@@ -26,6 +26,10 @@ func NewRootCmd() *cobra.Command {
 		Use:   "signal",
 		Short: "Set up Keld Signal telemetry for your local AI coding tools.",
 	}
+	signal.AddCommand(newSetupCmd())
+	signal.AddCommand(newStatusCmd())
+	signal.AddCommand(newDoctorCmd())
+	signal.AddCommand(newUninstallCmd())
 	root.AddCommand(signal)
 	return root
 }
