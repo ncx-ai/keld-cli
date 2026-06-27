@@ -1,0 +1,42 @@
+version: 2
+
+project_name: keld
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: keld
+    main: ./cmd/keld
+    binary: keld
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X github.com/ncx-ai/keld-cli/internal/version.CLI={{.Version}}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: keld
+    name_template: "keld_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: ncx-ai
+    name: keld-cli

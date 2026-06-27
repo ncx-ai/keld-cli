@@ -1,0 +1,10 @@
+{
+  "theme": "dark",
+  "telemetry": {
+    "enabled": true,
+    "target": "local",
+    "otlpProtocol": "http",
+    "otlpEndpoint": "https://atlas.keld.co/v1/logs?token=tok",
+    "logPrompts": false
+  }
+}
