@@ -98,22 +98,35 @@ func BackupConfig(path, toolName string) (string, error) {
 	return dest, nil
 }
 
-// copyFile copies src to dst, preserving file contents byte-for-byte.
+// copyFile copies src to dst byte-for-byte, preserving the source's
+// permission bits and modification time (matching Python's shutil.copy2).
 func copyFile(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	perm := srcInfo.Mode().Perm()
+
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
 
-	out, err := os.Create(dst)
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
-
 	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
 		return err
 	}
-	return out.Close()
+	if err := out.Close(); err != nil {
+		return err
+	}
+	// Chmod to defeat umask narrowing the perm on creation, then restore mtime.
+	if err := os.Chmod(dst, perm); err != nil {
+		return err
+	}
+	return os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime())
 }
