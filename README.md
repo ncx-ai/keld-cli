@@ -5,17 +5,35 @@ CLI) to send telemetry to Keld Atlas.
 
 ## Install
 
-Recommended (isolated, works on every platform):
+`keld` is a single static binary — no Python, no runtime, no dependencies.
+
+**Mac / Linux (one-liner):**
 
 ```bash
-pipx install keld
+curl -fsSL https://keld.co/install.sh | sh
 ```
 
-If you don't have pipx yet: `python -m pip install --user pipx && python -m pipx ensurepath`.
+**Windows (PowerShell):**
 
-Alternatives: `uvx keld` / `uv tool install keld` (if you use uv), or
-`pip install keld` **inside a virtual environment** (a bare `pip install` into
-system Python fails with `externally-managed-environment` on modern distros).
+```powershell
+irm https://keld.co/install.ps1 | iex
+```
+
+**Direct download** — grab the binary for your platform from
+[GitHub Releases](https://github.com/ncx-ai/keld-cli/releases/latest):
+
+| Platform      | Architecture | Asset                          |
+|---------------|--------------|--------------------------------|
+| macOS         | arm64        | `keld_darwin_arm64`            |
+| macOS         | amd64        | `keld_darwin_amd64`            |
+| Linux         | arm64        | `keld_linux_arm64`             |
+| Linux         | amd64        | `keld_linux_amd64`             |
+| Windows       | amd64        | `keld_windows_amd64.exe`       |
+
+Make the downloaded file executable (`chmod +x keld`) and place it on your `$PATH`.
+
+> Install scripts and signed release artifacts land in Tasks 21–23; the URLs
+> above are the intended final form.
 
 ## Usage
 
