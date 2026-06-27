@@ -78,12 +78,13 @@ func runUninstall(m *config.Manifest, names []string, yes bool, confirm func(str
 		console.Print(fmt.Sprintf("  ✓ %s", adapter.DisplayName()))
 	}
 
-	// If no tools remain, clear hook and endpoint/actor fields.
+	// If no tools remain, clear hook.json, state dir, and manifest fields.
 	if len(m.Tools) == 0 {
 		hookCfg := paths.HookConfigPath()
 		if _, err := os.Stat(hookCfg); err == nil {
 			_ = os.Remove(hookCfg)
 		}
+		_ = os.RemoveAll(paths.StateDir())
 		m.Hook = nil
 		m.Endpoint = nil
 		m.Actor = nil

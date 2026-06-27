@@ -22,6 +22,8 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newLoginCmd())
 	root.AddCommand(newLogoutCmd())
 	root.AddCommand(newWhoamiCmd())
+	// Hidden hook runner: keld __hook --source <tool>
+	root.AddCommand(newHookCmd())
 	// Signal group is expanded in later tasks.
 	signal := &cobra.Command{
 		Use:   "signal",

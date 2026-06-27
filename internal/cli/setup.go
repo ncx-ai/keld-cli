@@ -99,7 +99,7 @@ func runSetup(adapters []tools.Adapter, p tools.SetupParams, client *api.Client,
 		approveds = append(approveds, approved{adapter, plan})
 	}
 
-	console.Print("\nHook · keld __hook (keld binary)")
+	console.Print("\nHook · keld __hook (writes ~/.keld/hook.json)")
 
 	if opts.DryRun {
 		console.Print("\n--dry-run: no changes written.")
@@ -121,9 +121,10 @@ func runSetup(adapters []tools.Adapter, p tools.SetupParams, client *api.Client,
 		Actor:    &actor,
 		Tools:    map[string]config.ToolManifest{},
 	}
-	// Phase 1: stub hook installation; Task 18 will write hook.json.
 	manifest.Hook = &config.HookRecord{Version: version.CLI}
-	// TODO(Task 18): write ~/.keld/hook.json (endpoint+ingest_token) here
+	if err := config.SaveHookConfig(ob.Endpoint, ob.IngestToken); err != nil {
+		return nil, err
+	}
 
 	for _, a := range approveds {
 		backup, err := config.BackupConfig(a.plan.ConfigPath, a.adapter.Name())
