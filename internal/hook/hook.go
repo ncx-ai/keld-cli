@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -166,9 +167,15 @@ func reportError(stderr io.Writer, endpoint string, err error) {
 }
 
 // errSummary returns a concise, leak-free one-liner for prod stderr.
+// For network errors it returns only the reason (no request URL), matching
+// Python's _err_summary which returns str(exc.reason) for URLError.
 func errSummary(err error) string {
 	if hse, ok := err.(*httpStatusError); ok {
 		return fmt.Sprintf("HTTP %d", hse.code)
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return urlErr.Err.Error() // reason only, no URL
 	}
 	return err.Error()
 }

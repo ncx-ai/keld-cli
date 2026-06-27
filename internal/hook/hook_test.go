@@ -2,9 +2,11 @@ package hook
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -215,6 +217,28 @@ func TestIsDev(t *testing.T) {
 	t.Setenv("KELD_CTX_DEBUG", "0")
 	if IsDev("https://atlas.keld.co") {
 		t.Error("KELD_CTX_DEBUG=0 should not force dev mode")
+	}
+}
+
+func TestErrSummary(t *testing.T) {
+	if got := errSummary(&httpStatusError{code: 500}); got != "HTTP 500" {
+		t.Errorf("errSummary(HTTP 500)=%q want %q", got, "HTTP 500")
+	}
+
+	urlErr := &url.Error{
+		Op:  "Post",
+		URL: "http://example.com/v1/logs?token=secret",
+		Err: errors.New("connection refused"),
+	}
+	got := errSummary(urlErr)
+	if got != "connection refused" {
+		t.Errorf("errSummary(url.Error)=%q want %q", got, "connection refused")
+	}
+	// Must not leak the URL, host, or token.
+	for _, leak := range []string{"example.com", "token", "http://", "secret"} {
+		if strings.Contains(got, leak) {
+			t.Errorf("errSummary leaked %q in output: %q", leak, got)
+		}
 	}
 }
 
