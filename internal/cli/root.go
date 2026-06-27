@@ -9,12 +9,14 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ncx-ai/keld-cli/internal/errs"
+	"github.com/ncx-ai/keld-cli/internal/version"
 )
 
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "keld",
 		Short:         "Keld CLI",
+		Version:       version.CLI,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
