@@ -39,8 +39,12 @@ func Render(before *string, after, label string) {
 	}
 
 	for _, raw := range strings.Split(diffStr, "\n") {
-		// Reconstruct the line without trailing newline (diffStr uses \n as
-		// separator; Split already strips them).
+		// diffStr ends with a trailing "\n", so Split yields a final empty
+		// sentinel element. Skip it: real diff lines always carry a prefix
+		// char (' ', '+', '-', '@'), so only the sentinel is truly empty.
+		if raw == "" {
+			continue
+		}
 		line := raw
 		switch {
 		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):

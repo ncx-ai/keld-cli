@@ -20,6 +20,11 @@ func TestRenderShowsAddedLine(t *testing.T) {
 	if !strings.Contains(buf.String(), "+b") {
 		t.Fatalf("diff missing added line:\n%s", buf.String())
 	}
+	// No spurious trailing blank line beyond the diff content (parity with
+	// diffview.py, which never emits a line for the trailing "\n" sentinel).
+	if strings.HasSuffix(buf.String(), "\n\n") {
+		t.Fatalf("diff has spurious trailing blank line:\n%q", buf.String())
+	}
 }
 
 func TestRenderShowsRemovedLine(t *testing.T) {
