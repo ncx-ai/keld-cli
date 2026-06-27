@@ -27,10 +27,9 @@ func newLoginCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Match login.py: print "Logged in as <principal> (org: <org>)" after
-			// require_auth returns. On a fresh login, Login() also prints this message
-			// (matching device_flow.py behaviour), so the line appears twice — faithful
-			// replication of Python.
+			// Print "Logged in as <principal> (org: <org>)" after RequireAuth returns.
+			// On a fresh login, Login() also prints this message, so the line appears
+			// twice — intentional parity with the original Python CLI's behaviour.
 			console.Print(fmt.Sprintf("Logged in as %s (org: %s)", a.Principal, a.Org))
 			return nil
 		},

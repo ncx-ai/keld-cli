@@ -47,8 +47,8 @@ func HookCommand(source string) string {
 }
 
 // ClaudeEnv returns an ordered map of environment variables to inject into
-// Claude Code's settings for OTEL telemetry. Key order is locked to the
-// sequence defined in telemetry.py to ensure parity with the Python reference.
+// Claude Code's settings for OTEL telemetry. Key order is locked to a fixed
+// sequence to preserve parity with configs written by the original Python CLI.
 func ClaudeEnv(p SetupParams) *orderedmap.OrderedMap {
 	m := orderedmap.New()
 	m.Set("CLAUDE_CODE_ENABLE_TELEMETRY", "1")

@@ -10,8 +10,9 @@ import (
 )
 
 // Marker comments that delimit the keld-managed block in Codex config.toml.
-// These strings must remain byte-identical to KELD_TOML_START / KELD_TOML_END
-// in src/keld/config/merge.py so that already-installed blocks stay detectable.
+// These strings are frozen: they must remain byte-identical to the markers
+// written by earlier CLI versions (including the original Python CLI) so that
+// already-installed blocks stay detectable. Treat as a backward-compat contract.
 const (
 	KeldTOMLStart = "# >>> keld (managed by keld CLI — do not edit between markers)"
 	KeldTOMLEnd   = "# <<< keld"
