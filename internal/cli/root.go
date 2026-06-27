@@ -17,7 +17,10 @@ func NewRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	// Auth commands (login/logout/whoami) are added in Task 14.
+	// Auth commands registered in Task 14.
+	root.AddCommand(newLoginCmd())
+	root.AddCommand(newLogoutCmd())
+	root.AddCommand(newWhoamiCmd())
 	// Signal group is expanded in later tasks.
 	signal := &cobra.Command{
 		Use:   "signal",
