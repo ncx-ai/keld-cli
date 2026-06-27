@@ -24,10 +24,10 @@ type Plan struct {
 
 // ToolStatus describes the installation and configuration state of a tool.
 type ToolStatus struct {
-	Name        string
-	Installed   bool
-	Configured  bool
-	Detail      string
+	Name       string
+	Installed  bool
+	Configured bool
+	Detail     string
 }
 
 // Adapter is the interface that tool adapters (Claude Code, Codex, Gemini) must

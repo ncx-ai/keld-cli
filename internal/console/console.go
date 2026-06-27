@@ -16,8 +16,8 @@ var (
 	Err io.Writer = os.Stderr
 )
 
-func Print(a ...any)                  { fmt.Fprintln(Out, a...) }
-func Printf(format string, a ...any)  { fmt.Fprintf(Out, format, a...) }
+func Print(a ...any)                 { fmt.Fprintln(Out, a...) }
+func Printf(format string, a ...any) { fmt.Fprintf(Out, format, a...) }
 
 // Rule renders a titled horizontal divider (parity with rich console.rule).
 func Rule(title string) {
