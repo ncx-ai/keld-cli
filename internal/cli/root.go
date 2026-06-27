@@ -17,17 +17,13 @@ func NewRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	// Auth commands (login/logout/whoami) are implemented fully in Task 14;
-	// stubs are registered here so that --help lists them from the start.
-	login := &cobra.Command{Use: "login", Short: "Authenticate with Keld.", RunE: func(cmd *cobra.Command, args []string) error { return nil }}
-	logout := &cobra.Command{Use: "logout", Short: "Sign out of Keld.", RunE: func(cmd *cobra.Command, args []string) error { return nil }}
-	whoami := &cobra.Command{Use: "whoami", Short: "Show the current authenticated user.", RunE: func(cmd *cobra.Command, args []string) error { return nil }}
+	// Auth commands (login/logout/whoami) are added in Task 14.
 	// Signal group is expanded in later tasks.
 	signal := &cobra.Command{
 		Use:   "signal",
 		Short: "Set up Keld Signal telemetry for your local AI coding tools.",
 	}
-	root.AddCommand(login, logout, whoami, signal)
+	root.AddCommand(signal)
 	return root
 }
 

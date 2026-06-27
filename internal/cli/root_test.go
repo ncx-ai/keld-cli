@@ -15,9 +15,7 @@ func TestRootHelpListsSignalGroup(t *testing.T) {
 		t.Fatalf("help failed: %v", err)
 	}
 	s := out.String()
-	for _, want := range []string{"login", "logout", "whoami", "signal"} {
-		if !strings.Contains(s, want) {
-			t.Errorf("help missing %q\n%s", want, s)
-		}
+	if !strings.Contains(s, "signal") {
+		t.Errorf("help missing %q\n%s", "signal", s)
 	}
 }
