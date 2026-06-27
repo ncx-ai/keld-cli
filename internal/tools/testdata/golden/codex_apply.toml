@@ -1,0 +1,12 @@
+# >>> keld (managed by keld CLI — do not edit between markers)
+[otel]
+environment = "prod"
+log_user_prompt = false
+exporter = { otlp-http = { endpoint = "https://atlas.keld.co/v1/logs?token=tok", protocol = "json", headers = { "x-keld-actor" = "me" } } }
+
+[[hooks.SessionStart]]
+hooks = [ { type = "command", command = 'keld __hook --source codex' } ]
+
+[[hooks.PreToolUse]]
+hooks = [ { type = "command", command = 'keld __hook --source codex' } ]
+# <<< keld
