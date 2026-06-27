@@ -4,6 +4,8 @@ package tools
 import (
 	"strings"
 	"testing"
+
+	"github.com/ncx-ai/keld-cli/internal/config"
 )
 
 func TestCodexApplyFreshAddsBlock(t *testing.T) {
@@ -87,23 +89,31 @@ func TestCodexApplyCreatedFalseWhenCurrentTextExists(t *testing.T) {
 func TestCodexRemove(t *testing.T) {
 	a := &CodexAdapter{}
 	p := SetupParams{Endpoint: "https://e", IngestToken: "tok", Actor: "me"}
-	// Apply then remove.
-	plan := a.Apply(nil, p, false)
+	// Apply onto a config with unrelated content so we can assert it survives Remove.
+	cur := "[model]\nname = \"x\"\n"
+	plan := a.Apply(&cur, p, false)
 	if plan.Conflict != "" {
 		t.Fatalf("apply should succeed: %+v", plan)
 	}
 	managed := plan.Managed
 	afterApply := plan.AfterText
+	if !config.HasKeldBlock(afterApply) {
+		t.Fatalf("apply should have inserted a keld block; AfterText:\n%s", afterApply)
+	}
 
 	rem := a.Remove(&afterApply, managed)
-	if rem.Changed && rem.AfterText == afterApply {
+	if !rem.Changed {
 		t.Fatalf("remove should report Changed=true when block was present")
 	}
 	if rem.Conflict != "" {
 		t.Fatalf("remove should not conflict: %+v", rem)
 	}
-	if strings.Contains(rem.AfterText, "keld (managed") {
+	if config.HasKeldBlock(rem.AfterText) {
 		t.Fatalf("keld block still present after remove; AfterText:\n%s", rem.AfterText)
+	}
+	// Unrelated content must be preserved.
+	if !strings.Contains(rem.AfterText, "[model]") || !strings.Contains(rem.AfterText, "name = \"x\"") {
+		t.Fatalf("unrelated [model] content not preserved after remove; AfterText:\n%s", rem.AfterText)
 	}
 }
 
