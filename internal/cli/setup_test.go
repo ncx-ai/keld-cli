@@ -1,31 +1,45 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/ncx-ai/keld-cli/internal/api"
+	"github.com/ncx-ai/keld-cli/internal/errs"
 	"github.com/ncx-ai/keld-cli/internal/tools"
 )
 
 // fakeAdapter is a test double for tools.Adapter.
 type fakeAdapter struct {
 	name       string
+	configPath string
 	plan       tools.Plan
 	removePlan tools.Plan
 	status     tools.ToolStatus
+	// statusFn, when set, computes the status from the current config text and
+	// managed map (used to verify that callers read the real config file).
+	statusFn func(current *string, managed map[string]any) tools.ToolStatus
 }
 
 func (f *fakeAdapter) Name() string        { return f.name }
 func (f *fakeAdapter) DisplayName() string { return f.name }
 func (f *fakeAdapter) Detect() bool        { return true }
-func (f *fakeAdapter) ConfigPath() string  { return f.plan.ConfigPath }
+func (f *fakeAdapter) ConfigPath() string {
+	if f.configPath != "" {
+		return f.configPath
+	}
+	return f.plan.ConfigPath
+}
 func (f *fakeAdapter) Apply(_ *string, _ tools.SetupParams, _ bool) tools.Plan {
 	return f.plan
 }
 func (f *fakeAdapter) Remove(_ *string, _ map[string]any) tools.Plan { return f.removePlan }
-func (f *fakeAdapter) Status(_ *string, _ map[string]any) tools.ToolStatus {
+func (f *fakeAdapter) Status(current *string, managed map[string]any) tools.ToolStatus {
+	if f.statusFn != nil {
+		return f.statusFn(current, managed)
+	}
 	return f.status
 }
 
@@ -157,6 +171,51 @@ func TestRunSetupConflictSkip(t *testing.T) {
 	}
 	if _, ok := m.Tools["faketool"]; ok {
 		t.Error("skipped tool should not appear in manifest")
+	}
+}
+
+// TestRunSetupAbortReturnsSilentExit verifies FIX A: resolving a conflict with
+// "abort" returns errs.ErrSilentExit (so Execute() does not double-print) and
+// writes nothing.
+func TestRunSetupAbortReturnsSilentExit(t *testing.T) {
+	t.Setenv("KELD_HOME", t.TempDir())
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "tool.json")
+
+	adapter := &fakeAdapter{
+		name: "faketool",
+		plan: tools.Plan{
+			Name:       "faketool",
+			ConfigPath: cfgPath,
+			Managed:    map[string]any{},
+			Changed:    true,
+			Conflict:   "block already present",
+		},
+	}
+
+	ob := &api.Onboarding{Endpoint: "https://ep.example.com", IngestToken: "tok", Actor: "actor1"}
+	client := &api.Client{}
+	p := tools.SetupParams{Endpoint: ob.Endpoint, IngestToken: ob.IngestToken, Actor: ob.Actor}
+
+	opts := SetupOpts{
+		DryRun:          false,
+		Yes:             false,
+		Confirm:         func(string) bool { return true },
+		ResolveConflict: func(tools.Adapter, tools.Plan) string { return "abort" },
+	}
+
+	m, err := runSetup([]tools.Adapter{adapter}, p, client, ob, opts)
+	if !errors.Is(err, errs.ErrSilentExit) {
+		t.Fatalf("expected errs.ErrSilentExit on abort; got %v", err)
+	}
+	if m != nil {
+		t.Errorf("abort should return a nil manifest; got %+v", m)
+	}
+	if fileExists(cfgPath) {
+		t.Error("abort must not write any config file")
+	}
+	if fileExists(filepath.Join(os.Getenv("KELD_HOME"), "manifest.json")) {
+		t.Error("abort must not write the manifest")
 	}
 }
 

@@ -2,12 +2,52 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/ncx-ai/keld-cli/internal/config"
 	"github.com/ncx-ai/keld-cli/internal/console"
+	"github.com/ncx-ai/keld-cli/internal/errs"
 	"github.com/ncx-ai/keld-cli/internal/tools"
 )
+
+// TestCollectStatusReadsRealConfigForUnmanagedTool verifies FIX B: a tool whose
+// config file EXISTS and is configured but is NOT recorded in the manifest is
+// reported as "configured" (because collectStatus reads the real file), not
+// "not installed".
+func TestCollectStatusReadsRealConfigForUnmanagedTool(t *testing.T) {
+	t.Setenv("KELD_HOME", t.TempDir())
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "tool.json")
+	if err := os.WriteFile(cfgPath, []byte(`{"configured":true}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	adapter := &fakeAdapter{
+		name:       "faketool",
+		configPath: cfgPath,
+		// Status reflects the real config: configured iff the file was read.
+		statusFn: func(current *string, _ map[string]any) tools.ToolStatus {
+			if current != nil {
+				return tools.ToolStatus{Name: "faketool", Installed: true, Configured: true}
+			}
+			return tools.ToolStatus{Name: "faketool", Installed: false, Configured: false}
+		},
+	}
+
+	// Empty manifest — the tool is NOT recorded.
+	manifest := &config.Manifest{Tools: map[string]config.ToolManifest{}}
+
+	rows := collectStatus([]tools.Adapter{adapter}, manifest)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if !rows[0].status.Configured {
+		t.Errorf("expected configured=true (config file read despite not being in manifest); got %+v", rows[0].status)
+	}
+}
 
 func TestDoctorReportsDrift(t *testing.T) {
 	t.Setenv("KELD_HOME", t.TempDir())
@@ -48,6 +88,9 @@ func TestDoctorReportsDrift(t *testing.T) {
 	err = cmd.RunE(cmd, nil)
 	if err == nil {
 		t.Error("doctor should return an error when problems are found")
+	}
+	if !errors.Is(err, errs.ErrSilentExit) {
+		t.Errorf("doctor should return ErrSilentExit so Execute() does not double-print; got %v", err)
 	}
 
 	out := buf.String()

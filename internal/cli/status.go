@@ -9,8 +9,38 @@ import (
 	"github.com/ncx-ai/keld-cli/internal/auth"
 	"github.com/ncx-ai/keld-cli/internal/config"
 	"github.com/ncx-ai/keld-cli/internal/console"
+	"github.com/ncx-ai/keld-cli/internal/errs"
 	"github.com/ncx-ai/keld-cli/internal/tools"
 )
+
+// statusRow pairs a tool's display name with its computed status.
+type statusRow struct {
+	displayName string
+	status      tools.ToolStatus
+}
+
+// collectStatus mirrors Python's _collect_status: for every adapter it ALWAYS
+// reads the adapter's real config file (missing → nil), supplies the manifest's
+// managed map when the tool is recorded (else nil), and returns the status rows.
+func collectStatus(adapters []tools.Adapter, manifest *config.Manifest) []statusRow {
+	rows := make([]statusRow, 0, len(adapters))
+	for _, adapter := range adapters {
+		var current *string
+		if data, err := os.ReadFile(adapter.ConfigPath()); err == nil {
+			s := string(data)
+			current = &s
+		}
+		var managed map[string]any
+		if tm, inManifest := manifest.Tools[adapter.Name()]; inManifest {
+			managed = tm.Managed
+		}
+		rows = append(rows, statusRow{
+			displayName: adapter.DisplayName(),
+			status:      adapter.Status(current, managed),
+		})
+	}
+	return rows
+}
 
 func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
@@ -32,30 +62,17 @@ func newStatusCmd() *cobra.Command {
 				return err
 			}
 
-			for _, adapter := range tools.All() {
-				tm, inManifest := manifest.Tools[adapter.Name()]
-				var st tools.ToolStatus
-				if inManifest {
-					var current *string
-					if data, err := os.ReadFile(tm.ConfigPath); err == nil {
-						s := string(data)
-						current = &s
-					}
-					st = adapter.Status(current, tm.Managed)
-				} else {
-					st = adapter.Status(nil, nil)
-				}
-
+			for _, row := range collectStatus(tools.All(), manifest) {
 				var state string
 				switch {
-				case st.Configured:
+				case row.status.Configured:
 					state = "configured"
-				case st.Installed:
+				case row.status.Installed:
 					state = "not configured"
 				default:
 					state = "not installed"
 				}
-				console.Print(fmt.Sprintf("  %-14s %s", adapter.DisplayName(), state))
+				console.Print(fmt.Sprintf("  %-14s %s", row.displayName, state))
 			}
 
 			if manifest.Hook != nil {
@@ -110,7 +127,7 @@ func newDoctorCmd() *cobra.Command {
 				for _, p := range problems {
 					console.Print(fmt.Sprintf("  ✗ %s", p))
 				}
-				return fmt.Errorf("problems found")
+				return errs.ErrSilentExit
 			}
 			console.Print("No problems found.")
 			return nil

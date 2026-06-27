@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -38,6 +39,10 @@ func NewRootCmd() *cobra.Command {
 func Execute() int {
 	root := NewRootCmd()
 	if err := root.Execute(); err != nil {
+		if errors.Is(err, errs.ErrSilentExit) {
+			// The command already printed its own message; exit non-zero silently.
+			return 1
+		}
 		var ke *errs.Error
 		if as(err, &ke) {
 			color.New(color.FgRed, color.Bold).Fprint(os.Stderr, "Error: ")

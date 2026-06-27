@@ -12,6 +12,7 @@ import (
 	"github.com/ncx-ai/keld-cli/internal/config"
 	"github.com/ncx-ai/keld-cli/internal/console"
 	"github.com/ncx-ai/keld-cli/internal/diffview"
+	"github.com/ncx-ai/keld-cli/internal/errs"
 	"github.com/ncx-ai/keld-cli/internal/paths"
 	"github.com/ncx-ai/keld-cli/internal/tools"
 	"github.com/ncx-ai/keld-cli/internal/version"
@@ -64,7 +65,7 @@ func runSetup(adapters []tools.Adapter, p tools.SetupParams, client *api.Client,
 			choice := opts.ResolveConflict(adapter, plan)
 			if choice == "abort" {
 				console.Print("Aborted.")
-				return nil, fmt.Errorf("aborted")
+				return nil, errs.ErrSilentExit
 			}
 			if choice == "replace" {
 				plan = adapter.Apply(before, p, true)
