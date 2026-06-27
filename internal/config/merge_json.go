@@ -24,10 +24,59 @@ func LoadJSON(text string) (*orderedmap.OrderedMap, error) {
 	return o, nil
 }
 
+// disableEscapeHTML walks v and turns off HTML escaping on every
+// orderedmap.OrderedMap it finds (including nested maps and maps inside
+// arrays). The orderedmap library stores a per-instance escapeHTML flag
+// (default true) and its MarshalJSON does NOT inherit the parent encoder's
+// SetEscapeHTML setting, so without this the outer encoder's no-escape mode
+// would not reach nested objects — and values like "a&b" would emit as
+// "a&b", diverging from Python's json.dumps.
+//
+// For value-form nested maps (the form produced by Unmarshal), the flag is
+// set on a copy and written back into the parent via Set so the stored
+// instance reflects the change.
+func disableEscapeHTML(v any) {
+	switch m := v.(type) {
+	case *orderedmap.OrderedMap:
+		m.SetEscapeHTML(false)
+		for _, k := range m.Keys() {
+			cv, _ := m.Get(k)
+			disableEscapeHTML(cv)
+			// If the child was a value-form map, it was copied; write back.
+			if sm, ok := cv.(orderedmap.OrderedMap); ok {
+				sm.SetEscapeHTML(false)
+				m.Set(k, sm)
+			}
+		}
+	case orderedmap.OrderedMap:
+		// Operate on the addressable copy; caller is responsible for storing
+		// it back (handled by the *OrderedMap and []interface{} branches).
+		m.SetEscapeHTML(false)
+		for _, k := range m.Keys() {
+			cv, _ := m.Get(k)
+			disableEscapeHTML(cv)
+			if sm, ok := cv.(orderedmap.OrderedMap); ok {
+				sm.SetEscapeHTML(false)
+				m.Set(k, sm)
+			}
+		}
+	case []interface{}:
+		for i, e := range m {
+			disableEscapeHTML(e)
+			if sm, ok := e.(orderedmap.OrderedMap); ok {
+				sm.SetEscapeHTML(false)
+				m[i] = sm
+			}
+		}
+	}
+}
+
 // DumpJSON serialises obj to a JSON string with 2-space indent and a trailing
 // newline, matching Python's json.dumps(obj, indent=2) + "\n". HTML escaping
-// is disabled to match Python's default (Python does not escape &, <, >).
+// is disabled at every level to match Python's default (Python does not escape
+// &, <, >).
 func DumpJSON(obj *orderedmap.OrderedMap) string {
+	disableEscapeHTML(obj)
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false) // match Python json.dumps (no &,<,> escaping)
@@ -60,11 +109,17 @@ func subMap(obj *orderedmap.OrderedMap, key string) *orderedmap.OrderedMap {
 	return orderedmap.New()
 }
 
-// marshalCompact returns the compact JSON representation of v. Used for
-// idempotency checks (existing entry string comparison) and substring tests.
+// marshalCompact returns the compact JSON representation of v with HTML
+// escaping disabled, matching Python's json.dumps (which does not escape
+// &, <, >). Used for idempotency checks and substring tests so they are
+// byte-faithful to the Python CLI.
 func marshalCompact(v any) string {
-	b, _ := json.Marshal(v)
-	return string(b)
+	disableEscapeHTML(v)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(v)
+	return strings.TrimRight(buf.String(), "\n")
 }
 
 // MergeEnv upserts keys from env into the "env" sub-object of obj, preserving
