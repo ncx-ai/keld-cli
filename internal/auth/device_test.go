@@ -77,3 +77,41 @@ func TestLoginTimesOut(t *testing.T) {
 		t.Fatalf("unexpected error message: %v", err)
 	}
 }
+
+// TestLoginPollsDespiteBlockingOpener is the regression test for the hang where
+// the browser opener blocked the device-poll loop (some Linux xdg-open setups do
+// not return until the browser closes). Login must poll and succeed even when the
+// opener never returns.
+func TestLoginPollsDespiteBlockingOpener(t *testing.T) {
+	t.Setenv("KELD_HOME", t.TempDir())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/cli/device/start":
+			w.Write([]byte(`{"device_code":"dc","user_code":"UC","verification_url":"https://v","interval":1,"expires_in":10}`))
+		case "/v1/cli/device/poll":
+			w.Write([]byte(`{"access_token":"AT","principal":"p","org":"o"}`))
+		}
+	}))
+	defer srv.Close()
+
+	block := make(chan struct{})
+	defer close(block)
+	blockingOpener := func(string) error { <-block; return nil } // never returns until the test ends
+
+	done := make(chan *AuthData, 1)
+	go func() {
+		got, err := Login(api.NewClient(srv.URL, ""), true, func(time.Duration) {}, blockingOpener)
+		if err == nil {
+			done <- got
+		}
+	}()
+
+	select {
+	case got := <-done:
+		if got == nil || got.AccessToken != "AT" {
+			t.Fatalf("expected AuthData with AT, got %v", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Login blocked on the browser opener — the device-poll loop never ran")
+	}
+}

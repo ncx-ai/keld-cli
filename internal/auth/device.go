@@ -2,9 +2,9 @@ package auth
 
 import (
 	"fmt"
+	"os/exec"
+	"runtime"
 	"time"
-
-	"github.com/pkg/browser"
 
 	"github.com/ncx-ai/keld-cli/internal/api"
 	"github.com/ncx-ai/keld-cli/internal/console"
@@ -14,7 +14,8 @@ import (
 
 // Login performs the OAuth2 device-flow login against the Atlas API.
 // sleep and opener are injectable for testing; in production use time.Sleep
-// and browser.OpenURL respectively.
+// and openURL respectively. The opener is launched concurrently so it can never
+// block the device-poll loop.
 func Login(c *api.Client, openBrowser bool, sleep func(time.Duration), opener func(string) error) (*AuthData, error) {
 	ds, err := c.DeviceStart()
 	if err != nil {
@@ -28,10 +29,12 @@ func Login(c *api.Client, openBrowser bool, sleep func(time.Duration), opener fu
 
 	if openBrowser {
 		console.Print("(Opening your browser…)")
-		// Best-effort: a headless/SSH/CI environment has no browser. The URL was
-		// already printed above, so the user can open it manually. The opener
-		// result is intentionally ignored — do NOT abort login on failure.
-		_ = opener(ds.VerificationURL)
+		// Launch the browser concurrently. The opener can block until the browser
+		// process exits (some Linux xdg-open setups do not return until the
+		// browser window is closed), and the poll loop below MUST start regardless.
+		// Best-effort: the URL is printed above for manual use, so a launch
+		// failure never aborts login — the result is intentionally ignored.
+		go func() { _ = opener(ds.VerificationURL) }()
 	}
 
 	waited := 0
@@ -88,6 +91,26 @@ func RequireAuth(noLogin bool, openBrowser bool) (*AuthData, error) {
 		api.NewClient(paths.APIBase(), ""),
 		openBrowser,
 		time.Sleep,
-		func(url string) error { return browser.OpenURL(url) },
+		openURL,
 	)
+}
+
+// openURL launches the user's default browser pointed at url. It starts the
+// launcher without waiting (so it never blocks the caller) and discards the
+// browser's stdout/stderr (so GPU/driver chatter — e.g. libEGL warnings — does
+// not pollute the terminal). A non-nil error means the launcher failed to start;
+// callers treat browser opening as best-effort.
+func openURL(url string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default: // linux, *bsd, etc.
+		cmd = exec.Command("xdg-open", url)
+	}
+	cmd.Stdout = nil // discard → no browser chatter in our terminal
+	cmd.Stderr = nil
+	return cmd.Start() // Start, not Run: do not wait for the browser to exit
 }
