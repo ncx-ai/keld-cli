@@ -68,7 +68,7 @@ func NewJobContext(text, source string, m Model) *JobContext {
 	return &JobContext{Text: text, Source: source, Model: m, results: map[string]map[string]any{}}
 }
 
-// Set records a stage's output.
+// Set is called by the pipeline after the parallel stage; do not call it from an extractor goroutine.
 func (c *JobContext) Set(stage string, out map[string]any) { c.results[stage] = out }
 
 // Get returns a stage's output or nil.

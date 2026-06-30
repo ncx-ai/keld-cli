@@ -6,6 +6,8 @@ import "fmt"
 type Extractor interface {
 	Name() string
 	Version() string
+	// Run is invoked concurrently (one goroutine per extractor); it MUST be
+	// read-only w.r.t. ctx (return output; never call ctx.Set).
 	Run(ctx *JobContext) (map[string]any, error)
 }
 

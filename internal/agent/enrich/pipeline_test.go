@@ -19,6 +19,9 @@ func TestRunProducesEnrichedProfile(t *testing.T) {
 	if len(p.ExtractorVersions) != 3 {
 		t.Fatalf("want 3 extractor versions, got %d", len(p.ExtractorVersions))
 	}
+	if p.EnrichedAt.IsZero() {
+		t.Fatal("EnrichedAt must be set")
+	}
 }
 
 type panicModel struct{ Model }
