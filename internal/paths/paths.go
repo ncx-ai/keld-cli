@@ -36,6 +36,7 @@ func ManifestPath() string   { return filepath.Join(KeldHome(), "manifest.json")
 func HookConfigPath() string { return filepath.Join(KeldHome(), "hook.json") }
 func AgentInfoPath() string   { return filepath.Join(KeldHome(), "agent.json") }
 func AgentConfigPath() string { return filepath.Join(KeldHome(), "agent-config.json") }
+func DebugLogPath() string   { return filepath.Join(KeldHome(), "agent.log") }
 func StateDir() string       { return filepath.Join(KeldHome(), "state") }
 func BackupsDir() string     { return filepath.Join(KeldHome(), "backups") }
 

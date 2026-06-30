@@ -103,6 +103,13 @@ func Run(source string, stdin io.Reader, stderr io.Writer, now time.Time) (code 
 		return 0
 	}
 
+	promptID := stringVal(hookInput, "prompt_id")
+	transcriptPath := stringVal(hookInput, "transcript_path")
+
+	// Best-effort: hand the local enrichment daemon a pointer to this prompt.
+	// Silent no-op when the daemon is not running (power-user path).
+	forwardToAgent(source, sessionID, promptID, transcriptPath, cwd)
+
 	repo := DeriveRepo(cwd)
 	attributes := ReadAttributes(cwd)
 
