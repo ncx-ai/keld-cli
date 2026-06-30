@@ -3,6 +3,7 @@ package enrich
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestMaskEmailKeepsDomainHint(t *testing.T) {
@@ -29,5 +30,15 @@ func TestMaskShortValueFullyRedacted(t *testing.T) {
 	got := Mask("secret", "abc")
 	if strings.Contains(got, "abc") {
 		t.Fatalf("short value must be fully redacted: %q", got)
+	}
+}
+
+func TestMaskUnicodeNoInvalidUTF8(t *testing.T) {
+	got := Mask("password", "a€123")
+	if !utf8.ValidString(got) {
+		t.Fatalf("Mask returned invalid UTF-8: %q", got)
+	}
+	if strings.Contains(got, "a€123") {
+		t.Fatalf("Mask returned full value: %q", got)
 	}
 }

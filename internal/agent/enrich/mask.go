@@ -12,8 +12,9 @@ func Mask(label, value string) string {
 		}
 	}
 	const tail = 4
-	if len(value) <= tail+2 {
+	runes := []rune(value)
+	if len(runes) <= tail+2 {
 		return "***"
 	}
-	return "…" + value[len(value)-tail:]
+	return "…" + string(runes[len(runes)-tail:])
 }
