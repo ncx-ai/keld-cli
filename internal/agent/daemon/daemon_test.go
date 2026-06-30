@@ -53,6 +53,9 @@ func TestWorkerEnrichesInlineAndNeverLeaksRaw(t *testing.T) {
 	q.Close()
 
 	e := fs.all()[0]
+	if e.Actor != "dg@keld.co" {
+		t.Fatalf("actor not propagated: %q", e.Actor)
+	}
 	if e.Correlation.ID != "T1" || e.TaskType.Value != "codegen" {
 		t.Fatalf("unexpected enrichment: %+v", e)
 	}

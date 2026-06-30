@@ -8,6 +8,8 @@ type TranscriptReader interface {
 	Read(transcriptPath, promptID string) (text string, ok bool)
 }
 
+// readers is written only from init() (single-threaded) and needs no mutex;
+// if dynamic registration is ever added, writes must be guarded.
 var readers = map[string]TranscriptReader{}
 
 func register(r TranscriptReader) { readers[r.Source()] = r }

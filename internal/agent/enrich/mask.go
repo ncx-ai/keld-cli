@@ -8,6 +8,7 @@ import "strings"
 func Mask(label, value string) string {
 	if label == "email" {
 		if at := strings.LastIndex(value, "@"); at >= 0 {
+			// Safe: '@' is a single-byte ASCII char so at+1 is always a valid rune boundary.
 			return "***@" + value[at+1:]
 		}
 	}

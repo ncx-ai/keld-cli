@@ -17,6 +17,7 @@ import (
 	"github.com/ncx-ai/keld-cli/internal/agent/queue"
 	"github.com/ncx-ai/keld-cli/internal/agent/resolve"
 	"github.com/ncx-ai/keld-cli/internal/agent/settings"
+	"github.com/ncx-ai/keld-cli/internal/config"
 	"github.com/ncx-ai/keld-cli/internal/hook"
 )
 
@@ -69,8 +70,12 @@ func Run(ctx context.Context) error {
 		return err
 	}
 	set := settings.Load()
+	actor := ""
+	if m, err := config.LoadManifest(); err == nil && m != nil && m.Actor != nil {
+		actor = *m.Actor
+	}
 	q := queue.New(256)
-	pub := publish.New(enrichEndpoint(cfg.Endpoint), cfg.IngestToken, "")
+	pub := publish.New(enrichEndpoint(cfg.Endpoint), cfg.IngestToken, actor)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -82,7 +87,7 @@ func Run(ctx context.Context) error {
 	}
 	log.Printf("keld-agent: listening on 127.0.0.1:%d", port)
 
-	go Worker(q, enrich.NewDeterministic(), pub, "", set.IncludeEntityText)
+	go Worker(q, enrich.NewDeterministic(), pub, actor, set.IncludeEntityText)
 
 	srv := &http.Server{Handler: ingress.Handler(q, secret)}
 	go func() {
