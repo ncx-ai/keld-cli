@@ -29,7 +29,7 @@ func (e TaskTypeExtractor) Run(ctx *JobContext) (map[string]any, error) {
 	if len(ranked) == 0 {
 		ranked = []Ranked{{Label: "other", Confidence: 0}}
 	}
-	alts := make([]Labeled, 0, len(ranked)-1)
+	alts := make([]Labeled, 0, max(0, len(ranked)-1))
 	for _, r := range ranked[1:] {
 		alts = append(alts, Labeled{Value: r.Label, Confidence: r.Confidence, Producer: e.Version()})
 	}
@@ -69,12 +69,13 @@ func (e SensitivityExtractor) Run(ctx *JobContext) (map[string]any, error) {
 	if hard := sensitivityFromEntities(found); hard != "" {
 		value, conf = hard, 1.0 // hard span evidence beats the weak classifier
 	}
+	// Defensive: a Model backend could return an empty top label; never emit "".
 	if value == "" {
 		value = "none"
 	}
 
 	return map[string]any{
-		"sensitivity":      Labeled{Value: value, Confidence: conf, Producer: e.Version()},
+		"sensitivity":       Labeled{Value: value, Confidence: conf, Producer: e.Version()},
 		"sensitivity_spans": spans,
 	}, nil
 }

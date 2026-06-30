@@ -16,7 +16,10 @@ func TestSensitivityHardEvidenceOverrides(t *testing.T) {
 
 func TestSensitivitySpansAreMaskedNotRaw(t *testing.T) {
 	ctx := NewJobContext("key sk-live-ABCDEF0123456789 here", "claude_code", NewDeterministic())
-	out, _ := SensitivityExtractor{}.Run(ctx)
+	out, err := SensitivityExtractor{}.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	spans := out["sensitivity_spans"].([]Entity)
 	if len(spans) == 0 {
 		t.Fatal("expected at least one span")
