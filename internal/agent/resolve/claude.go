@@ -59,7 +59,11 @@ func (r *ClaudeReader) Read(path, promptID string) (string, bool) {
 			r.setCursor(path, off+adv)
 			return text, true
 		}
-		lastAdv = adv
+		// adv grows monotonically across attempts (file only appends from off);
+		// keep the largest so the give-up cursor never moves backwards.
+		if adv > lastAdv {
+			lastAdv = adv
+		}
 		if i < attempts-1 {
 			time.Sleep(r.Delay)
 		}
