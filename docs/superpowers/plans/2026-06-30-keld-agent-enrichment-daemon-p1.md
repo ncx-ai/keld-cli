@@ -2144,6 +2144,93 @@ git commit -m "feat(agent): loopback HTTP ingress (pointer/inline, secret, 202/4
   - `agentcli.NewRootCmd()` with a `run` subcommand calling `daemon.Run`.
 - NOTE: the daemon test's `Worker(...)` call must pass the new `includeEntityText` arg (use `false`).
 
+- [ ] **Step 0a: Add the agent-config path helper**
+
+In `internal/paths/paths.go`, add after `DebugLogPath` (or after `AgentInfoPath` if DebugLogPath isn't present yet):
+
+```go
+func AgentConfigPath() string { return filepath.Join(KeldHome(), "agent-config.json") }
+```
+
+- [ ] **Step 0b: Settings package (TDD)**
+
+Create `internal/agent/settings/settings_test.go`:
+
+```go
+package settings
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestLoadDefaultsWhenAbsent(t *testing.T) {
+	t.Setenv("KELD_HOME", t.TempDir())
+	if Load().IncludeEntityText {
+		t.Fatal("IncludeEntityText must default to false")
+	}
+}
+
+func TestLoadReadsIncludeEntityText(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KELD_HOME", dir)
+	if err := os.WriteFile(filepath.Join(dir, "agent-config.json"), []byte(`{"include_entity_text":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !Load().IncludeEntityText {
+		t.Fatal("expected IncludeEntityText=true")
+	}
+}
+
+func TestLoadInvalidJSONReturnsDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KELD_HOME", dir)
+	_ = os.WriteFile(filepath.Join(dir, "agent-config.json"), []byte("{not json"), 0o600)
+	if Load().IncludeEntityText {
+		t.Fatal("invalid JSON must yield defaults")
+	}
+}
+```
+
+Run `go test ./internal/agent/settings/` → FAIL (undefined). Then create `internal/agent/settings/settings.go`:
+
+```go
+// Package settings holds daemon settings loaded at startup from
+// ~/.keld/agent-config.json. Absent/unreadable/invalid file -> zero-value
+// defaults. This local file is the seam a future org-level remote control-plane
+// plugs into (push settings to all org daemons).
+package settings
+
+import (
+	"encoding/json"
+	"os"
+
+	"github.com/ncx-ai/keld-cli/internal/paths"
+)
+
+// Settings are the admin-configurable daemon options.
+type Settings struct {
+	// IncludeEntityText, when true, sends domain-entity surface text to Atlas.
+	// Default false (privacy-first). Sensitivity spans are always masked
+	// regardless of this setting.
+	IncludeEntityText bool `json:"include_entity_text"`
+}
+
+// Load reads ~/.keld/agent-config.json. Missing/unreadable/invalid -> defaults.
+func Load() Settings {
+	var s Settings
+	data, err := os.ReadFile(paths.AgentConfigPath())
+	if err != nil {
+		return s
+	}
+	_ = json.Unmarshal(data, &s) // invalid JSON -> keep zero-value defaults
+	return s
+}
+```
+
+Run `go test ./internal/agent/settings/` → PASS.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `internal/agent/daemon/daemon_test.go`:
@@ -2183,7 +2270,7 @@ func (f *fakeSender) all() []publish.Enrichment {
 func TestWorkerEnrichesInlineAndNeverLeaksRaw(t *testing.T) {
 	q := queue.New(10)
 	fs := &fakeSender{}
-	go Worker(q, enrich.NewDeterministic(), fs, "dg@keld.co")
+	go Worker(q, enrich.NewDeterministic(), fs, "dg@keld.co", false)
 
 	q.Offer(queue.Job{
 		Source: "claude_desktop", Scheme: "trace", ID: "T1",
@@ -2246,6 +2333,7 @@ import (
 	"github.com/ncx-ai/keld-cli/internal/agent/publish"
 	"github.com/ncx-ai/keld-cli/internal/agent/queue"
 	"github.com/ncx-ai/keld-cli/internal/agent/resolve"
+	"github.com/ncx-ai/keld-cli/internal/agent/settings"
 	"github.com/ncx-ai/keld-cli/internal/hook"
 )
 
@@ -2256,17 +2344,17 @@ type Sender interface {
 
 // Worker consumes jobs, resolves text, enriches, and publishes. It is
 // panic-isolated per job so one bad prompt never kills the daemon.
-func Worker(q *queue.Queue, m enrich.Model, pub Sender, actor string) {
+func Worker(q *queue.Queue, m enrich.Model, pub Sender, actor string, includeEntityText bool) {
 	for {
 		j, ok := q.Next()
 		if !ok {
 			return
 		}
-		process(j, m, pub, actor)
+		process(j, m, pub, actor, includeEntityText)
 	}
 }
 
-func process(j queue.Job, m enrich.Model, pub Sender, actor string) {
+func process(j queue.Job, m enrich.Model, pub Sender, actor string, includeEntityText bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("keld-agent: worker recovered: %v", r)
@@ -2277,7 +2365,7 @@ func process(j queue.Job, m enrich.Model, pub Sender, actor string) {
 		return // could not resolve prompt text; skip silently
 	}
 	profile := enrich.Run(text, j.Source, m)
-	e := publish.Build(j, profile, actor, time.Now())
+	e := publish.Build(j, profile, actor, includeEntityText, time.Now())
 	if err := pub.Send(e); err != nil {
 		log.Printf("keld-agent: publish failed for %s: %v", j.Key(), err)
 	}
@@ -2294,9 +2382,10 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	set := settings.Load()
 	q := queue.New(256)
 	pub := publish.New(enrichEndpoint(cfg.Endpoint), cfg.IngestToken, "")
-	go Worker(q, enrich.NewDeterministic(), pub, "")
+	go Worker(q, enrich.NewDeterministic(), pub, "", set.IncludeEntityText)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -3187,7 +3276,7 @@ func TestNoRawTextOrSecretInPublishedPayload(t *testing.T) {
 	raw := "translate this and here is my password: hunter2SuperSecretValue and email a@b.com"
 	p := enrich.Run(raw, "claude_code", enrich.NewDeterministic())
 	j := queue.Job{Source: "claude_code", Scheme: "prompt_id", ID: "X"}
-	e := publish.Build(j, p, "dg@keld.co", time.Unix(0, 0).UTC())
+	e := publish.Build(j, p, "dg@keld.co", false, time.Unix(0, 0).UTC())
 
 	b, _ := json.Marshal(e)
 	s := string(b)
@@ -3237,3 +3326,27 @@ git commit -m "test(agent): end-to-end privacy leak guard"
 **Placeholder scan:** No TBD/TODO; every code step has complete code; every test has real assertions. ✓
 
 **Type consistency:** `enrich.Profile` fields consumed by `publish.Build` match Task 7 definitions; `queue.Job` fields consumed by ingress (Task 11) and publisher (Task 10) match Task 9; `daemon.Sender` matches `publish.Publisher.Send` signature; `agentcfg.Info{Port,Secret}` consistent across Tasks 1/12/13. ✓
+
+## Final whole-branch review — deferrals to P2
+
+The final review confirmed the privacy invariant holds end-to-end and found one
+must-fix (actor wiring, fixed before merge). The following are explicitly
+deferred to P2 (recorded so they are not lost):
+
+- **Disk-backed offline retry for the publisher** (spec §5/§10). P1 ships
+  best-effort single-POST (logs + drops on failure); coverage is partial by
+  design. Durable bounded retry lands in P2.
+- **`source.version` for the Claude Code pointer path.** The hook does not have
+  the Claude Code version handy; `source.version` is currently empty for that
+  source. Correlation joins on `{source.id, scheme, id}` (not version), so this
+  only affects version segmentation. Populate when the version is available.
+- **`enrichEndpoint` route validation.** The daemon derives the enrichments URL
+  by substituting `/v1/enrichments` into the onboarding ingest endpoint. Validate
+  against the real keld-atlas route before P3.
+- **Unconfigured hot-loop.** If `keld-agent` is installed but `keld login` has
+  not run, `daemon.Run` returns an error immediately; with `Restart=on-failure`
+  the service may hot-loop. The GUI installer logs in before starting the service
+  (spec §9 first-run flow), so this is an edge; consider an idle/backoff path in
+  P2/P3.
+- Accumulated per-task minors (test cosmetics, regex edges, positional literals,
+  installer archive-member hygiene) — see `.superpowers/sdd/progress.md`.
