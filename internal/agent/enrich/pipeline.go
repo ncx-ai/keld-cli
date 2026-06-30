@@ -1,0 +1,102 @@
+package enrich
+
+import (
+	"sync"
+	"time"
+)
+
+// runStage executes one extractor with panic isolation; ok=false on panic/error.
+func runStage(ex Extractor, ctx *JobContext) (out map[string]any, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			out, ok = nil, false
+		}
+	}()
+	o, err := ex.Run(ctx)
+	if err != nil {
+		return nil, false
+	}
+	return o, true
+}
+
+// Run executes the wave-1 extractors in parallel and assembles a Profile.
+func Run(text, source string, m Model) Profile {
+	ctx := NewJobContext(text, source, m)
+	exs := Wave1()
+
+	type res struct {
+		name string
+		out  map[string]any
+		ok   bool
+	}
+	results := make([]res, len(exs))
+	var wg sync.WaitGroup
+	for i, ex := range exs {
+		wg.Add(1)
+		go func(i int, ex Extractor) {
+			defer wg.Done()
+			out, ok := runStage(ex, ctx)
+			results[i] = res{name: ex.Name(), out: out, ok: ok}
+		}(i, ex)
+	}
+	wg.Wait()
+
+	anyFailed := false
+	for _, r := range results {
+		if !r.ok {
+			anyFailed = true
+			continue
+		}
+		ctx.Set(r.name, r.out)
+	}
+
+	status := "enriched"
+	if anyFailed {
+		status = "partial"
+	}
+
+	versions := map[string]string{}
+	for _, ex := range exs {
+		versions[ex.Name()] = ex.Version()
+	}
+
+	return Profile{
+		TaskType:          labeledFrom(ctx.Get("task_type"), "task_type", "task_type"),
+		TaskTypeAlt:       altsFrom(ctx.Get("task_type")),
+		Domain:            labeledFrom(ctx.Get("domain_entities"), "domain", "domain_entities"),
+		Entities:          entitiesFrom(ctx.Get("domain_entities"), "entities"),
+		Sensitivity:       labeledFrom(ctx.Get("sensitivity"), "sensitivity", "sensitivity"),
+		SensitivitySpans:  entitiesFrom(ctx.Get("sensitivity"), "sensitivity_spans"),
+		PipelineStatus:    status,
+		ExtractorVersions: versions,
+		SchemaVersion:     SchemaVersion,
+		EnrichedAt:        time.Now().UTC(),
+	}
+}
+
+func labeledFrom(out map[string]any, key, producer string) Labeled {
+	if out != nil {
+		if l, ok := out[key].(Labeled); ok {
+			return l
+		}
+	}
+	return Labeled{Value: "", Confidence: 0, Producer: producer}
+}
+
+func altsFrom(out map[string]any) []Labeled {
+	if out != nil {
+		if a, ok := out["task_type_alt"].([]Labeled); ok {
+			return a
+		}
+	}
+	return nil
+}
+
+func entitiesFrom(out map[string]any, key string) []Entity {
+	if out != nil {
+		if e, ok := out[key].([]Entity); ok {
+			return e
+		}
+	}
+	return nil
+}
