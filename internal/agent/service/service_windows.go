@@ -1,0 +1,36 @@
+//go:build windows
+
+package service
+
+import (
+	"os"
+	"os/exec"
+)
+
+// taskName is the Windows Scheduled Task name.
+const taskName = "KeldAgent"
+
+func Install() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	// Per-user logon task running `keld-agent run`.
+	return exec.Command("schtasks", "/Create", "/F",
+		"/SC", "ONLOGON",
+		"/TN", taskName,
+		"/TR", `"`+exe+`" run`,
+	).Run()
+}
+
+func Uninstall() error {
+	return exec.Command("schtasks", "/Delete", "/F", "/TN", taskName).Run()
+}
+
+func Status() (string, error) {
+	out, err := exec.Command("schtasks", "/Query", "/TN", taskName).CombinedOutput()
+	if err != nil {
+		return "not installed", nil
+	}
+	return string(out), nil
+}

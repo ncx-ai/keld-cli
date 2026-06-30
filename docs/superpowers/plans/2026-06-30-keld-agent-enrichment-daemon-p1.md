@@ -2126,17 +2126,110 @@ git commit -m "feat(agent): loopback HTTP ingress (pointer/inline, secret, 202/4
 ### Task 12: Daemon assembly + `keld-agent run` + integration test
 
 **Files:**
+- Create: `internal/agent/settings/settings.go` (+ test) — daemon settings loaded at startup
 - Create: `internal/agent/daemon/daemon.go`
 - Create: `cmd/keld-agent/main.go`
 - Create: `internal/agentcli/agentcli.go` (cobra root for keld-agent)
 - Test: `internal/agent/daemon/daemon_test.go`
+- Modify: `internal/paths/paths.go` (add `AgentConfigPath` → `~/.keld/agent-config.json`)
+
+**Settings (added per the entity-text-policy decision):**
+- `settings.Settings{IncludeEntityText bool}`; `settings.Load() Settings` reads `~/.keld/agent-config.json`, returns zero-value defaults (so `IncludeEntityText` defaults to **false**) when absent/unreadable. This local file is the seam a future org-level remote control-plane plugs into (spec §12 P4).
 
 **Interfaces:**
-- Consumes: all prior packages + `hook.LoadConfig` (existing) + `agentcfg`.
+- Consumes: all prior packages + `hook.LoadConfig` (existing) + `agentcfg` + `settings`.
 - Produces:
-  - `daemon.Worker(q *queue.Queue, m enrich.Model, pub Sender, actor string)` where `daemon.Sender` is an interface `Send(publish.Enrichment) error` (so tests inject a fake); worker loops `q.Next()`, resolves text (`resolve.Resolve`), runs `enrich.Run`, builds + sends.
-  - `daemon.Run(ctx context.Context) error` — wires queue, deterministic model, publisher from `hook.LoadConfig`, ingress server on `127.0.0.1:0`, writes `agentcfg`, starts the worker.
+  - `daemon.Worker(q *queue.Queue, m enrich.Model, pub Sender, actor string, includeEntityText bool)` where `daemon.Sender` is an interface `Send(publish.Enrichment) error` (so tests inject a fake); worker loops `q.Next()`, resolves text (`resolve.Resolve`), runs `enrich.Run`, calls `publish.Build(job, profile, actor, includeEntityText, time.Now())`, sends.
+  - `daemon.Run(ctx context.Context) error` — wires queue, deterministic model, publisher from `hook.LoadConfig`, loads `settings.Load()`, ingress server on `127.0.0.1:0`, writes `agentcfg`, starts the worker (passing `settings.IncludeEntityText`).
   - `agentcli.NewRootCmd()` with a `run` subcommand calling `daemon.Run`.
+- NOTE: the daemon test's `Worker(...)` call must pass the new `includeEntityText` arg (use `false`).
+
+- [ ] **Step 0a: Add the agent-config path helper**
+
+In `internal/paths/paths.go`, add after `DebugLogPath` (or after `AgentInfoPath` if DebugLogPath isn't present yet):
+
+```go
+func AgentConfigPath() string { return filepath.Join(KeldHome(), "agent-config.json") }
+```
+
+- [ ] **Step 0b: Settings package (TDD)**
+
+Create `internal/agent/settings/settings_test.go`:
+
+```go
+package settings
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestLoadDefaultsWhenAbsent(t *testing.T) {
+	t.Setenv("KELD_HOME", t.TempDir())
+	if Load().IncludeEntityText {
+		t.Fatal("IncludeEntityText must default to false")
+	}
+}
+
+func TestLoadReadsIncludeEntityText(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KELD_HOME", dir)
+	if err := os.WriteFile(filepath.Join(dir, "agent-config.json"), []byte(`{"include_entity_text":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !Load().IncludeEntityText {
+		t.Fatal("expected IncludeEntityText=true")
+	}
+}
+
+func TestLoadInvalidJSONReturnsDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KELD_HOME", dir)
+	_ = os.WriteFile(filepath.Join(dir, "agent-config.json"), []byte("{not json"), 0o600)
+	if Load().IncludeEntityText {
+		t.Fatal("invalid JSON must yield defaults")
+	}
+}
+```
+
+Run `go test ./internal/agent/settings/` → FAIL (undefined). Then create `internal/agent/settings/settings.go`:
+
+```go
+// Package settings holds daemon settings loaded at startup from
+// ~/.keld/agent-config.json. Absent/unreadable/invalid file -> zero-value
+// defaults. This local file is the seam a future org-level remote control-plane
+// plugs into (push settings to all org daemons).
+package settings
+
+import (
+	"encoding/json"
+	"os"
+
+	"github.com/ncx-ai/keld-cli/internal/paths"
+)
+
+// Settings are the admin-configurable daemon options.
+type Settings struct {
+	// IncludeEntityText, when true, sends domain-entity surface text to Atlas.
+	// Default false (privacy-first). Sensitivity spans are always masked
+	// regardless of this setting.
+	IncludeEntityText bool `json:"include_entity_text"`
+}
+
+// Load reads ~/.keld/agent-config.json. Missing/unreadable/invalid -> defaults.
+func Load() Settings {
+	var s Settings
+	data, err := os.ReadFile(paths.AgentConfigPath())
+	if err != nil {
+		return s
+	}
+	_ = json.Unmarshal(data, &s) // invalid JSON -> keep zero-value defaults
+	return s
+}
+```
+
+Run `go test ./internal/agent/settings/` → PASS.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2177,7 +2270,7 @@ func (f *fakeSender) all() []publish.Enrichment {
 func TestWorkerEnrichesInlineAndNeverLeaksRaw(t *testing.T) {
 	q := queue.New(10)
 	fs := &fakeSender{}
-	go Worker(q, enrich.NewDeterministic(), fs, "dg@keld.co")
+	go Worker(q, enrich.NewDeterministic(), fs, "dg@keld.co", false)
 
 	q.Offer(queue.Job{
 		Source: "claude_desktop", Scheme: "trace", ID: "T1",
@@ -2240,6 +2333,7 @@ import (
 	"github.com/ncx-ai/keld-cli/internal/agent/publish"
 	"github.com/ncx-ai/keld-cli/internal/agent/queue"
 	"github.com/ncx-ai/keld-cli/internal/agent/resolve"
+	"github.com/ncx-ai/keld-cli/internal/agent/settings"
 	"github.com/ncx-ai/keld-cli/internal/hook"
 )
 
@@ -2250,17 +2344,17 @@ type Sender interface {
 
 // Worker consumes jobs, resolves text, enriches, and publishes. It is
 // panic-isolated per job so one bad prompt never kills the daemon.
-func Worker(q *queue.Queue, m enrich.Model, pub Sender, actor string) {
+func Worker(q *queue.Queue, m enrich.Model, pub Sender, actor string, includeEntityText bool) {
 	for {
 		j, ok := q.Next()
 		if !ok {
 			return
 		}
-		process(j, m, pub, actor)
+		process(j, m, pub, actor, includeEntityText)
 	}
 }
 
-func process(j queue.Job, m enrich.Model, pub Sender, actor string) {
+func process(j queue.Job, m enrich.Model, pub Sender, actor string, includeEntityText bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("keld-agent: worker recovered: %v", r)
@@ -2271,7 +2365,7 @@ func process(j queue.Job, m enrich.Model, pub Sender, actor string) {
 		return // could not resolve prompt text; skip silently
 	}
 	profile := enrich.Run(text, j.Source, m)
-	e := publish.Build(j, profile, actor, time.Now())
+	e := publish.Build(j, profile, actor, includeEntityText, time.Now())
 	if err := pub.Send(e); err != nil {
 		log.Printf("keld-agent: publish failed for %s: %v", j.Key(), err)
 	}
@@ -2288,9 +2382,10 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	set := settings.Load()
 	q := queue.New(256)
 	pub := publish.New(enrichEndpoint(cfg.Endpoint), cfg.IngestToken, "")
-	go Worker(q, enrich.NewDeterministic(), pub, "")
+	go Worker(q, enrich.NewDeterministic(), pub, "", set.IncludeEntityText)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -2402,18 +2497,141 @@ git commit -m "feat(agent): daemon assembly, worker, and keld-agent run"
 
 ---
 
-### Task 13: Hook localhost-forward branch (silent-skip)
+### Task 13: Hook localhost-forward branch + finite-size debug log
+
+The hook→daemon forward is silent-skip toward the *host tool* (never blocks or
+fails it), but POST errors must not vanish entirely: they are recorded to a
+**finite-size local debug log** (`~/.keld/agent.log`, bounded by rotation) so a
+user/operator can diagnose why enrichment isn't flowing. The log never contains
+prompt text — only the endpoint, HTTP status, and the opaque `prompt_id`.
 
 **Files:**
+- Modify: `internal/paths/paths.go` (add `DebugLogPath`)
+- Create: `internal/debuglog/debuglog.go`
 - Create: `internal/hook/forward.go`
 - Modify: `internal/hook/hook.go` (call `forwardToAgent` near the end of `Run`, before `return 0`)
+- Test: `internal/debuglog/debuglog_test.go`
 - Test: `internal/hook/forward_test.go`
 
 **Interfaces:**
-- Consumes: `agentcfg.Read`.
-- Produces: `hook.forwardToAgent(source, sessionID, promptID, transcriptPath, cwd string)` — best-effort POST of a pointer to the local daemon; never returns an error, never blocks > 500ms, no-ops when `agent.json` is absent.
+- Consumes: `agentcfg.Read`, `paths.KeldHome`.
+- Produces:
+  - `paths.DebugLogPath() string` → `~/.keld/agent.log`.
+  - `debuglog.Append(format string, args ...any)` — best-effort timestamped line to the debug log; rotates to `<path>.1` when the active file reaches `debuglog.MaxBytes` (so total on-disk usage is bounded to ~2×MaxBytes); never returns an error, never panics, **never receives prompt text** from callers.
+  - `hook.forwardToAgent(source, sessionID, promptID, transcriptPath, cwd string)` — best-effort POST of a pointer to the local daemon; never returns an error, never blocks > 500ms, no-ops when `agent.json` is absent, and records POST transport errors / non-2xx responses via `debuglog.Append`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Add the debug-log path helper**
+
+In `internal/paths/paths.go`, add after `AgentInfoPath`:
+
+```go
+func DebugLogPath() string { return filepath.Join(KeldHome(), "agent.log") }
+```
+
+- [ ] **Step 2: Write the failing debuglog test**
+
+Create `internal/debuglog/debuglog_test.go`:
+
+```go
+package debuglog
+
+import (
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/ncx-ai/keld-cli/internal/paths"
+)
+
+func TestAppendWritesTimestampedLine(t *testing.T) {
+	t.Setenv("KELD_HOME", t.TempDir())
+	Append("hello %d", 7)
+	data, err := os.ReadFile(paths.DebugLogPath())
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(data), "hello 7") {
+		t.Fatalf("log missing line: %q", data)
+	}
+}
+
+func TestRotateWhenOverCap(t *testing.T) {
+	t.Setenv("KELD_HOME", t.TempDir())
+	old := MaxBytes
+	defer func() { MaxBytes = old }()
+	MaxBytes = 20
+
+	Append("first line, definitely over twenty bytes")
+	Append("second")
+
+	if _, err := os.Stat(paths.DebugLogPath() + ".1"); err != nil {
+		t.Fatalf("expected rotated file .1: %v", err)
+	}
+	data, _ := os.ReadFile(paths.DebugLogPath())
+	if !strings.Contains(string(data), "second") {
+		t.Fatalf("active log should hold the newest line: %q", data)
+	}
+}
+```
+
+- [ ] **Step 3: Run test to verify it fails**
+
+Run: `cd ~/keld/keld-cli && go test ./internal/debuglog/`
+Expected: FAIL (`Append`, `MaxBytes` undefined).
+
+- [ ] **Step 4: Write the debuglog implementation**
+
+Create `internal/debuglog/debuglog.go`:
+
+```go
+// Package debuglog writes a finite-size, best-effort debug log under ~/.keld.
+// It records otherwise-silent errors (e.g. hook->daemon POST failures) without
+// ever blocking the caller. Callers must never pass prompt text to it.
+package debuglog
+
+import (
+	"fmt"
+	"os"
+	"sync"
+	"time"
+
+	"github.com/ncx-ai/keld-cli/internal/paths"
+)
+
+// MaxBytes caps the active log file. When it is reached the file rotates to
+// <path>.1, bounding total on-disk usage to ~2*MaxBytes. Exported as a var so
+// tests can shrink it.
+var MaxBytes int64 = 1 << 20 // 1 MiB
+
+var mu sync.Mutex
+
+// Append writes a timestamped line. Best-effort: every error is swallowed.
+func Append(format string, args ...any) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if err := os.MkdirAll(paths.KeldHome(), 0o755); err != nil {
+		return
+	}
+	path := paths.DebugLogPath()
+	if st, err := os.Stat(path); err == nil && st.Size() >= MaxBytes {
+		_ = os.Rename(path, path+".1") // overwrites any previous .1
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(time.Now().UTC().Format(time.RFC3339) + " " + fmt.Sprintf(format, args...) + "\n")
+}
+```
+
+- [ ] **Step 5: Run test to verify it passes**
+
+Run: `cd ~/keld/keld-cli && go test ./internal/debuglog/`
+Expected: PASS.
+
+- [ ] **Step 6: Write the failing forward test**
 
 Create `internal/hook/forward_test.go`:
 
@@ -2426,10 +2644,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/ncx-ai/keld-cli/internal/agent/agentcfg"
+	"github.com/ncx-ai/keld-cli/internal/paths"
 )
 
 func TestForwardPostsPointerWithSecret(t *testing.T) {
@@ -2469,14 +2690,44 @@ func TestForwardNoopWhenAgentAbsent(t *testing.T) {
 	// Must not panic or block when agent.json is missing.
 	forwardToAgent("claude_code", "S1", "P1", "/t", "/cwd")
 }
+
+func TestForwardLogsNon2xxWithoutPromptText(t *testing.T) {
+	t.Setenv("KELD_HOME", t.TempDir())
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		w.WriteHeader(500)
+	}))
+	defer srv.Close()
+
+	u, _ := url.Parse(srv.URL)
+	port, _ := strconv.Atoi(u.Port())
+	if err := agentcfg.Write(agentcfg.Info{Port: port, Secret: "sek"}); err != nil {
+		t.Fatal(err)
+	}
+
+	forwardToAgent("claude_code", "S1", "P1", "/secret/transcript.jsonl", "/cwd")
+
+	data, err := os.ReadFile(paths.DebugLogPath())
+	if err != nil {
+		t.Fatalf("expected a debug log entry: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, "500") {
+		t.Fatalf("debug log should record the status: %q", s)
+	}
+	if strings.Contains(s, "/secret/transcript.jsonl") {
+		t.Fatalf("debug log must not contain the transcript path/content: %q", s)
+	}
+}
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 7: Run test to verify it fails**
 
 Run: `cd ~/keld/keld-cli && go test ./internal/hook/ -run TestForward`
 Expected: FAIL (`forwardToAgent` undefined).
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 8: Write the forward implementation**
 
 Create `internal/hook/forward.go`:
 
@@ -2492,11 +2743,13 @@ import (
 	"time"
 
 	"github.com/ncx-ai/keld-cli/internal/agent/agentcfg"
+	"github.com/ncx-ai/keld-cli/internal/debuglog"
 )
 
 // forwardToAgent best-effort POSTs an enrich pointer to the local daemon. It is
-// silent-skip: any error (no daemon, bad config, timeout) is swallowed so the
-// host tool is never affected.
+// silent-skip toward the host tool: it never returns an error and never blocks
+// it. POST transport errors / non-2xx responses are recorded in the finite-size
+// debug log (endpoint + status + prompt_id only — never prompt text).
 func forwardToAgent(source, sessionID, promptID, transcriptPath, cwd string) {
 	info, err := agentcfg.Read()
 	if err != nil || info == nil || info.Port == 0 || promptID == "" {
@@ -2522,13 +2775,17 @@ func forwardToAgent(source, sessionID, promptID, transcriptPath, cwd string) {
 	req.Header.Set("x-keld-agent-secret", info.Secret)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		debuglog.Append("forward: POST %s failed (prompt_id=%s): %v", url, promptID, err)
 		return
 	}
-	_ = resp.Body.Close()
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		debuglog.Append("forward: POST %s returned %d (prompt_id=%s)", url, resp.StatusCode, promptID)
+	}
 }
 ```
 
-- [ ] **Step 4: Wire the call into `Run`**
+- [ ] **Step 9: Wire the call into `Run`**
 
 In `internal/hook/hook.go`, locate the `ChangedSinceLast` block in `Run`. The function currently resolves `sessionID`, `cwd`, and `repo`. Add a `promptID` resolution after `sessionID` is resolved (find the line `sessionID = stringVal(hookInput, "thread_id")` block end) and a forward call before the final dedup/POST. Concretely, add after the `if sessionID == "" { return 0 }` guard:
 
@@ -2541,16 +2798,16 @@ In `internal/hook/hook.go`, locate the `ChangedSinceLast` block in `Run`. The fu
 	forwardToAgent(source, sessionID, promptID, transcriptPath, cwd)
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [ ] **Step 10: Run tests to verify they pass**
 
-Run: `cd ~/keld/keld-cli && go test ./internal/hook/`
-Expected: PASS (existing hook tests + new forward tests).
+Run: `cd ~/keld/keld-cli && go test ./internal/hook/ ./internal/debuglog/ ./internal/paths/`
+Expected: PASS (existing hook tests + new forward/debuglog tests + paths).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
-git add internal/hook/forward.go internal/hook/hook.go internal/hook/forward_test.go
-git commit -m "feat(hook): silent-skip forward of enrich pointer to local daemon"
+git add internal/paths/paths.go internal/debuglog/ internal/hook/forward.go internal/hook/hook.go internal/hook/forward_test.go
+git commit -m "feat(hook): forward enrich pointer to daemon + finite-size debug log for POST errors"
 ```
 
 ---
@@ -3019,7 +3276,7 @@ func TestNoRawTextOrSecretInPublishedPayload(t *testing.T) {
 	raw := "translate this and here is my password: hunter2SuperSecretValue and email a@b.com"
 	p := enrich.Run(raw, "claude_code", enrich.NewDeterministic())
 	j := queue.Job{Source: "claude_code", Scheme: "prompt_id", ID: "X"}
-	e := publish.Build(j, p, "dg@keld.co", time.Unix(0, 0).UTC())
+	e := publish.Build(j, p, "dg@keld.co", false, time.Unix(0, 0).UTC())
 
 	b, _ := json.Marshal(e)
 	s := string(b)
@@ -3069,3 +3326,27 @@ git commit -m "test(agent): end-to-end privacy leak guard"
 **Placeholder scan:** No TBD/TODO; every code step has complete code; every test has real assertions. ✓
 
 **Type consistency:** `enrich.Profile` fields consumed by `publish.Build` match Task 7 definitions; `queue.Job` fields consumed by ingress (Task 11) and publisher (Task 10) match Task 9; `daemon.Sender` matches `publish.Publisher.Send` signature; `agentcfg.Info{Port,Secret}` consistent across Tasks 1/12/13. ✓
+
+## Final whole-branch review — deferrals to P2
+
+The final review confirmed the privacy invariant holds end-to-end and found one
+must-fix (actor wiring, fixed before merge). The following are explicitly
+deferred to P2 (recorded so they are not lost):
+
+- **Disk-backed offline retry for the publisher** (spec §5/§10). P1 ships
+  best-effort single-POST (logs + drops on failure); coverage is partial by
+  design. Durable bounded retry lands in P2.
+- **`source.version` for the Claude Code pointer path.** The hook does not have
+  the Claude Code version handy; `source.version` is currently empty for that
+  source. Correlation joins on `{source.id, scheme, id}` (not version), so this
+  only affects version segmentation. Populate when the version is available.
+- **`enrichEndpoint` route validation.** The daemon derives the enrichments URL
+  by substituting `/v1/enrichments` into the onboarding ingest endpoint. Validate
+  against the real keld-atlas route before P3.
+- **Unconfigured hot-loop.** If `keld-agent` is installed but `keld login` has
+  not run, `daemon.Run` returns an error immediately; with `Restart=on-failure`
+  the service may hot-loop. The GUI installer logs in before starting the service
+  (spec §9 first-run flow), so this is an edge; consider an idle/backoff path in
+  P2/P3.
+- Accumulated per-task minors (test cosmetics, regex edges, positional literals,
+  installer archive-member hygiene) — see `.superpowers/sdd/progress.md`.

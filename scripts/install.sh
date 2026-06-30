@@ -56,7 +56,7 @@ echo "  Destination: ${DEST}/keld"
 
 mkdir -p "$DEST"
 
-if ! curl -fsSL "$url" | tar -xz -C "$DEST" keld; then
+if ! curl -fsSL "$url" | tar -xz -C "$DEST"; then
   echo "" >&2
   echo "keld installer: download or extraction failed." >&2
   echo "  URL: ${url}" >&2
@@ -66,8 +66,18 @@ fi
 
 chmod +x "${DEST}/keld"
 
+if [ -f "${DEST}/keld-agent" ]; then
+  chmod +x "${DEST}/keld-agent"
+  if command -v systemctl >/dev/null 2>&1; then
+    "${DEST}/keld-agent" install || echo "keld: could not enable keld-agent service (enable later with: keld-agent install)" >&2
+  fi
+fi
+
 echo ""
 echo "keld ${tag} installed to ${DEST}/keld"
+if [ -f "${DEST}/keld-agent" ]; then
+  echo "keld-agent installed to ${DEST}/keld-agent"
+fi
 echo ""
 echo "Next steps:"
 echo "  1. Ensure ${DEST} is on your PATH."

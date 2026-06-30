@@ -261,7 +261,15 @@ different sources never collide and so consumers can segment by origin.
     transcript): text travels **over loopback only**, guarded by the per-user
     secret, and is never persisted beyond the in-memory job.
 - Only `{source, correlation, labels, schema_version, model_version, ts}` leave
-  the box — never prompt text.
+  the box — never the prompt text itself.
+- **Domain-entity surface text is admin-gated, default OFF.** Domain entities
+  (`language`/`framework`/`library`/`org`/`product`) are extracted *fragments* of
+  the prompt; `org`/`product` in particular can be proprietary. By default the
+  publisher sends only their `{label, start, end, confidence}` — the surface
+  `text` is cleared. An admin setting (`include_entity_text`, default `false`)
+  can enable sending the surface forms when the org wants richer segmentation.
+  `sensitivity_spans` are **always masked regardless of this setting** — they are
+  never gated and never carry raw values.
 - **Sensitive findings are doubly protected:** a detected secret/PII is reported
   as `{label, start, end, confidence, masked}` where `masked` is a redacted hint
   (e.g. `sk-…AB12`, `j***@acme.com`) computed locally. The **raw matched value
@@ -269,7 +277,8 @@ different sources never collide and so consumers can segment by origin.
   in-memory job. Masking is applied at extraction time, before the value can
   reach any sink.
 - Daemon binds `127.0.0.1` only; ingress requires a per-user shared secret.
-- No prompt text in logs (ids and lengths only).
+- No prompt text in logs, including the finite-size `~/.keld/agent.log` debug
+  log (ids, endpoints, and statuses only).
 - A dedicated leak test scans all outbound payloads + log output and asserts
   **zero** prompt-text content.
 
@@ -304,8 +313,12 @@ login (device flow opens browser)
 
 ## 10. Error handling
 
-- Hook → localhost POST: silent fire-and-forget, `<500ms` timeout; daemon down
-  ⇒ that prompt is simply unenriched. Never blocks or fails the host tool.
+- Hook → localhost POST: silent fire-and-forget toward the host tool, `<500ms`
+  timeout; daemon down ⇒ that prompt is simply unenriched. Never blocks or fails
+  the host tool. POST transport errors / non-2xx responses are recorded to a
+  **finite-size local debug log** (`~/.keld/agent.log`, rotated to bound size) —
+  endpoint + status + `prompt_id` only, never prompt text — so failures are
+  diagnosable instead of fully invisible.
 - Transcript read failure / format drift ⇒ skip enrichment, increment a metric,
   log a warning (no prompt text).
 - `Model` backend failure / per-extractor failure ⇒ deterministic backend, else
@@ -343,7 +356,9 @@ login (device flow opens browser)
 - **Idempotent upsert on `{source.id, correlation.scheme, correlation.id}`.**
 - Joins to existing telemetry rows by the same composite key; for Claude Code
   that reduces to `prompt_id`.
-- `domain` (named `entities`) is non-sensitive; `sensitivity` carries job-level
+- `domain` (named `entities`) is non-sensitive *labels*; the entity `text`
+  surface forms are sent only when the admin setting `include_entity_text` is on
+  (default off — see Privacy invariants). `sensitivity` carries job-level
   compliance class and `sensitivity_spans` carry **masked** findings only.
 - Enrichment coverage is **partial by design** (sampled under host load), so
   Atlas treats enrichments as optional augmentation, not 1:1 with every prompt.
@@ -381,10 +396,16 @@ wire contract is fixed here.)
 - **P3 — GUI installers.** `.pkg` + MSI + signing/notarization. (The
   launch-blocking deliverable, since the installer is the enforced path; P1–P2
   are validated headless first because that is faster.)
-- **P4 — more sources.** Agent-framework producers (LangChain / Mastra) and
-  Claude Desktop (chat / cowork) over the inline path; Codex/Gemini
-  `TranscriptReader`s as those tools expose prompt text to a hook; tray/menu-bar
-  status UI.
+- **P4 — more sources + org control plane.** Agent-framework producers
+  (LangChain / Mastra) and Claude Desktop (chat / cowork) over the inline path;
+  Codex/Gemini `TranscriptReader`s as those tools expose prompt text to a hook;
+  tray/menu-bar status UI. **Org-level remote settings:** an admin can push
+  settings to all running daemons connected to their org to globally toggle
+  behaviors — starting with `include_entity_text` — following one general
+  remote-settings pattern (poll/subscribe a per-org settings document; daemons
+  apply on next fetch). P1 ships the *local* settings file these later become a
+  remote source for; the daemon reads settings at startup so the control-plane is
+  a drop-in source later, not a rewrite.
 
 ## 13. Open risks
 

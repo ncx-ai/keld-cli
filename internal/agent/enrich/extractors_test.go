@@ -1,0 +1,51 @@
+package enrich
+
+import "testing"
+
+func TestSensitivityHardEvidenceOverrides(t *testing.T) {
+	ctx := NewJobContext("my ssn is 123-45-6789", "claude_code", NewDeterministic())
+	out, err := SensitivityExtractor{}.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lab := out["sensitivity"].(Labeled)
+	if lab.Value != "phi" || lab.Confidence != 1.0 {
+		t.Fatalf("ssn must force phi@1.0, got %+v", lab)
+	}
+}
+
+func TestSensitivitySpansAreMaskedNotRaw(t *testing.T) {
+	ctx := NewJobContext("key sk-live-ABCDEF0123456789 here", "claude_code", NewDeterministic())
+	out, err := SensitivityExtractor{}.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spans := out["sensitivity_spans"].([]Entity)
+	if len(spans) == 0 {
+		t.Fatal("expected at least one span")
+	}
+	for _, s := range spans {
+		if s.Text != "" {
+			t.Fatalf("span Text must be cleared, got %q", s.Text)
+		}
+		if s.Masked == "" {
+			t.Fatalf("span Masked must be set: %+v", s)
+		}
+	}
+}
+
+func TestTaskTypeExtractorTopLabel(t *testing.T) {
+	ctx := NewJobContext("write a function in go", "claude_code", NewDeterministic())
+	out, _ := TaskTypeExtractor{}.Run(ctx)
+	if out["task_type"].(Labeled).Value != "codegen" {
+		t.Fatalf("want codegen, got %+v", out["task_type"])
+	}
+}
+
+func TestDomainEntitiesExtractor(t *testing.T) {
+	ctx := NewJobContext("debug this python api bug", "claude_code", NewDeterministic())
+	out, _ := DomainEntitiesExtractor{}.Run(ctx)
+	if out["domain"].(Labeled).Value != "software" {
+		t.Fatalf("want software, got %+v", out["domain"])
+	}
+}
