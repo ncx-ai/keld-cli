@@ -1174,8 +1174,9 @@ git commit -m "feat(enrich): staged pipeline with isolation and Profile assembly
 **Interfaces:**
 - Produces:
   - `resolve.TranscriptReader` interface: `Source() string`; `Read(transcriptPath, promptID string) (string, bool)` — returns `(text, true)` when found, `("", false)` when not (caller skips).
-  - `resolve.ClaudeReader{Attempts int; Delay time.Duration}` implementing it (defaults via `resolve.NewClaudeReader()`); reads JSONL, returns the `text` of the user message whose `uuid`/`promptId` matches, with a bounded poll for write-timing.
+  - `resolve.ClaudeReader` — a **stateful pointer** type holding a per-transcript byte cursor (`cursors map[string]int64` + `sync.Mutex`) plus poll config (`Attempts int; Delay time.Duration`); constructed via `resolve.NewClaudeReader() *ClaudeReader`. It scans only newly appended JSONL lines from the cursor, advancing only past newline-terminated lines, resetting on file shrink, and returns the `text` of the user message whose `promptId`/`uuid` matches.
   - `resolve.Resolve(source, transcriptPath, promptID, inline string) (string, bool)` — uses inline when non-empty, else dispatches to the registered reader for `source`.
+- Note: the cursor lives in the reader (held warm by the daemon). One full pass happens only on the first prompt of a resumed session (cursor starts at 0); every subsequent prompt scans only the bytes appended since.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1191,9 +1192,13 @@ import (
 	"time"
 )
 
+func userLine(promptID, text string) string {
+	return `{"type":"user","promptId":"` + promptID + `","message":{"role":"user","content":"` + text + `"}}` + "\n"
+}
+
 const sampleJSONL = `{"type":"summary"}
-{"type":"user","promptId":"P1","message":{"role":"user","content":"hello world"}}
-{"type":"assistant","message":{"role":"assistant","content":"hi"}}
+` + `{"type":"user","promptId":"P1","message":{"role":"user","content":"hello world"}}
+` + `{"type":"assistant","message":{"role":"assistant","content":"hi"}}
 `
 
 func writeTranscript(t *testing.T, body string) string {
@@ -1204,6 +1209,18 @@ func writeTranscript(t *testing.T, body string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+func appendLine(t *testing.T, path, line string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(line); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestClaudeReaderFindsPromptByID(t *testing.T) {
@@ -1217,17 +1234,77 @@ func TestClaudeReaderFindsPromptByID(t *testing.T) {
 
 func TestClaudeReaderMissingPromptReturnsFalse(t *testing.T) {
 	p := writeTranscript(t, sampleJSONL)
-	r := ClaudeReader{Attempts: 2, Delay: time.Millisecond}
+	r := NewClaudeReader()
+	r.Attempts, r.Delay = 2, time.Millisecond
 	if _, ok := r.Read(p, "NOPE"); ok {
 		t.Fatal("missing prompt id must return ok=false")
 	}
 }
 
-func TestClaudeReaderTolueratesMalformedLines(t *testing.T) {
+func TestClaudeReaderToleratesMalformedLines(t *testing.T) {
 	body := "not json\n" + sampleJSONL + "{bad\n"
 	p := writeTranscript(t, body)
 	if _, ok := NewClaudeReader().Read(p, "P1"); !ok {
 		t.Fatal("malformed lines must be skipped, valid line still found")
+	}
+}
+
+// After consuming P1, the cursor advances past it: a second read does NOT
+// re-scan it (proves incremental, non-O(n) behaviour). A subsequently appended
+// P2 is found by reading only the new tail.
+func TestClaudeReaderIncrementalAdvancesCursor(t *testing.T) {
+	p := writeTranscript(t, userLine("P1", "first"))
+	r := NewClaudeReader()
+	r.Attempts, r.Delay = 1, time.Millisecond
+
+	if got, ok := r.Read(p, "P1"); !ok || got != "first" {
+		t.Fatalf("first read: (%q,%v)", got, ok)
+	}
+	// P1 is now behind the cursor; re-requesting it must not re-scan from 0.
+	if _, ok := r.Read(p, "P1"); ok {
+		t.Fatal("P1 should be behind the cursor after first read")
+	}
+	appendLine(t, p, userLine("P2", "second"))
+	if got, ok := r.Read(p, "P2"); !ok || got != "second" {
+		t.Fatalf("incremental read of P2: (%q,%v)", got, ok)
+	}
+}
+
+// A trailing line without a newline (write in flight) must not be consumed; once
+// the rest is flushed, the next read finds it.
+func TestClaudeReaderPartialLineNotConsumed(t *testing.T) {
+	complete := userLine("P1", "done")
+	partial := `{"type":"user","promptId":"P2","message":{"role":"user","content":"flush` // no closing + newline
+	p := writeTranscript(t, complete+partial)
+	r := NewClaudeReader()
+	r.Attempts, r.Delay = 1, time.Millisecond
+
+	if _, ok := r.Read(p, "P2"); ok {
+		t.Fatal("partial line must not be matched yet")
+	}
+	// Overwrite with the fully-flushed version; cursor (past P1) still valid.
+	if err := os.WriteFile(p, []byte(complete+userLine("P2", "flushed")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := r.Read(p, "P2"); !ok || got != "flushed" {
+		t.Fatalf("after flush: (%q,%v)", got, ok)
+	}
+}
+
+// If the file shrinks (truncation / rotation / compaction), the cursor resets.
+func TestClaudeReaderResetsOnTruncation(t *testing.T) {
+	p := writeTranscript(t, userLine("P1", "a")+userLine("P2", "b")+userLine("P3", "c"))
+	r := NewClaudeReader()
+	r.Attempts, r.Delay = 1, time.Millisecond
+	if _, ok := r.Read(p, "P3"); !ok { // advance cursor near EOF
+		t.Fatal("expected P3")
+	}
+	// Replace with a smaller file; cursor (> new size) must reset to 0.
+	if err := os.WriteFile(p, []byte(userLine("P9", "z")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := r.Read(p, "P9"); !ok || got != "z" {
+		t.Fatalf("after truncation: (%q,%v)", got, ok)
 	}
 }
 
@@ -1287,21 +1364,30 @@ package resolve
 import (
 	"bufio"
 	"encoding/json"
+	"io"
 	"os"
+	"sync"
 	"time"
 )
 
-// ClaudeReader reads ~/.claude/projects/.../<session>.jsonl transcripts.
-// It tolerates malformed lines and polls briefly for write-timing.
+// ClaudeReader reads ~/.claude/projects/.../<session>.jsonl transcripts. It keeps
+// a per-transcript byte cursor so each prompt scans only newly appended lines
+// (transcripts grow unbounded — re-reading from byte 0 each time would be
+// O(file^2)). It tolerates malformed lines and polls briefly for write-timing.
 type ClaudeReader struct {
 	Attempts int
 	Delay    time.Duration
+
+	mu      sync.Mutex
+	cursors map[string]int64 // transcript path -> offset of last consumed complete line
 }
 
 // NewClaudeReader returns a reader with sane poll defaults.
-func NewClaudeReader() ClaudeReader { return ClaudeReader{Attempts: 10, Delay: 50 * time.Millisecond} }
+func NewClaudeReader() *ClaudeReader {
+	return &ClaudeReader{Attempts: 10, Delay: 50 * time.Millisecond, cursors: map[string]int64{}}
+}
 
-func (ClaudeReader) Source() string { return "claude_code" }
+func (*ClaudeReader) Source() string { return "claude_code" }
 
 // claudeLine is a tolerant view of a transcript line. The format is internal to
 // Claude Code and may drift; unknown shapes are skipped, never fatal.
@@ -1317,47 +1403,98 @@ type claudeMsg struct {
 	Content json.RawMessage `json:"content"`
 }
 
-func (r ClaudeReader) Read(path, promptID string) (string, bool) {
+// Read scans from the stored cursor for the line whose promptId/uuid matches,
+// polling briefly for write-timing. On success the cursor advances past the
+// matched line; on give-up it advances past the consumed tail so the next prompt
+// never re-reads it.
+func (r *ClaudeReader) Read(path, promptID string) (string, bool) {
 	attempts := r.Attempts
 	if attempts < 1 {
 		attempts = 1
 	}
+	off := r.startOffset(path)
+	var lastAdv int64
 	for i := 0; i < attempts; i++ {
-		if text, ok := r.scan(path, promptID); ok {
+		text, found, adv := scanFrom(path, off, promptID)
+		if found {
+			r.setCursor(path, off+adv)
 			return text, true
 		}
+		lastAdv = adv
 		if i < attempts-1 {
 			time.Sleep(r.Delay)
 		}
 	}
+	r.setCursor(path, off+lastAdv)
 	return "", false
 }
 
-func (r ClaudeReader) scan(path, promptID string) (string, bool) {
+// startOffset returns the stored cursor, resetting to 0 if the file shrank
+// (truncation / rotation / compaction).
+func (r *ClaudeReader) startOffset(path string) int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	off := r.cursors[path]
+	if st, err := os.Stat(path); err == nil && st.Size() < off {
+		off = 0
+		r.cursors[path] = 0
+	}
+	return off
+}
+
+// setCursor advances the stored cursor (never moves it backwards).
+func (r *ClaudeReader) setCursor(path string, off int64) {
+	r.mu.Lock()
+	if off > r.cursors[path] {
+		r.cursors[path] = off
+	}
+	r.mu.Unlock()
+}
+
+// scanFrom reads complete (newline-terminated) lines starting at byte offset off.
+// It returns the matching prompt text (if any) and the number of bytes of
+// complete lines consumed: up to and including the match when found, else the
+// whole appended tail. A trailing partial line (no newline yet) is never
+// consumed, so a write-in-progress line is re-read on the next attempt.
+func scanFrom(path string, off int64, promptID string) (text string, found bool, advance int64) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", false
+		return "", false, 0
 	}
 	defer f.Close()
-
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	for sc.Scan() {
-		var ln claudeLine
-		if err := json.Unmarshal(sc.Bytes(), &ln); err != nil {
-			continue // tolerate malformed lines
+	if _, err := f.Seek(off, io.SeekStart); err != nil {
+		return "", false, 0
+	}
+	br := bufio.NewReaderSize(f, 64*1024)
+	var consumed int64
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			// io.EOF: `line` is a partial trailing line (not newline-terminated)
+			// and must not be consumed. Any other read error: stop.
+			break
 		}
-		if ln.Type != "user" {
-			continue
-		}
-		if ln.PromptID != promptID && ln.UUID != promptID {
-			continue
-		}
-		if text, ok := extractText(ln.Message); ok {
-			return text, true
+		consumed += int64(len(line))
+		if t, ok := matchLine(line, promptID); ok {
+			return t, true, consumed
 		}
 	}
-	return "", false
+	return "", false, consumed
+}
+
+// matchLine parses one JSONL line and returns the user prompt text if it matches.
+func matchLine(line, promptID string) (string, bool) {
+	var ln claudeLine
+	if err := json.Unmarshal([]byte(line), &ln); err != nil {
+		return "", false // tolerate malformed lines
+	}
+	if ln.Type != "user" {
+		return "", false
+	}
+	if ln.PromptID != promptID && ln.UUID != promptID {
+		return "", false
+	}
+	return extractText(ln.Message)
 }
 
 // extractText handles message.content as either a bare string or an array of

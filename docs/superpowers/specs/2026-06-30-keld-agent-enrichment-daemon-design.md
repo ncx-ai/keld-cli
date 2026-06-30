@@ -154,11 +154,15 @@ to `127.0.0.1:<port>` when the daemon answers and does nothing when it does not
    explicitly sampled, never a brake on the producer.
 3. **PromptResolver** — turns an ingress request into prompt text. For *pointer*
    requests it dispatches to a provider-agnostic **TranscriptReader** (one impl
-   per tool; given `transcript_path` + `prompt_id`, returns the turn's text,
-   handling write-timing via a short bounded poll/tail for the matching line,
-   tolerant JSONL parsing, **clean skip** on version drift, golden-file tests).
-   For *inline* requests it uses the supplied text directly. Either way the text
-   is resolved entirely on-box.
+   per tool; given `transcript_path` + `prompt_id`, returns the turn's text).
+   The reader keeps a **per-transcript byte cursor** and scans only newly
+   appended lines (transcripts grow unbounded; re-reading from byte 0 each prompt
+   would be O(file²)). It advances the cursor only past newline-terminated lines
+   (a partial in-flight line is re-read next attempt), resets the cursor on file
+   shrink (truncation / rotation / compaction), tolerates malformed lines, does a
+   **clean skip** on version drift, and is covered by golden-file tests. For
+   *inline* requests it uses the supplied text directly. Either way the text is
+   resolved entirely on-box.
 4. **EnrichmentPipeline** (Extractor registry + waves; ported from
    `inference-enrichment`) — runs wave-1 extractors in parallel over the prompt:
    - **`task_type`** — job classification (`TASK_TYPES`), top label + alts.
@@ -388,8 +392,10 @@ wire contract is fixed here.)
    Mitigation: tolerant parsing, golden fixtures per known shape, clean skip on
    drift, a CI canary that flags format changes.
 2. **Write-timing** — the new user turn may not be flushed to the `.jsonl` at the
-   instant `UserPromptSubmit` fires. Mitigation: short bounded poll/tail for the
-   line matching `prompt_id`; give up after a small budget and skip.
+   instant `UserPromptSubmit` fires. Mitigation: short bounded poll for the line
+   matching `prompt_id`, scanning only from the per-transcript byte cursor; a
+   trailing partial line (no newline) is never consumed, so it is re-read once
+   flushed; give up after a small budget and skip.
 3. **`UserPromptSubmit` raw-prompt availability** — current docs confirm
    `prompt_id` in stdin but do **not** confirm raw `prompt` text; design assumes
    it is unavailable and sources text from the transcript instead. If a future
