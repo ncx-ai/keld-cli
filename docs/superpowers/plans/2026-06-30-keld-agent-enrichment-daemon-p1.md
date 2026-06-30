@@ -2402,18 +2402,141 @@ git commit -m "feat(agent): daemon assembly, worker, and keld-agent run"
 
 ---
 
-### Task 13: Hook localhost-forward branch (silent-skip)
+### Task 13: Hook localhost-forward branch + finite-size debug log
+
+The hook→daemon forward is silent-skip toward the *host tool* (never blocks or
+fails it), but POST errors must not vanish entirely: they are recorded to a
+**finite-size local debug log** (`~/.keld/agent.log`, bounded by rotation) so a
+user/operator can diagnose why enrichment isn't flowing. The log never contains
+prompt text — only the endpoint, HTTP status, and the opaque `prompt_id`.
 
 **Files:**
+- Modify: `internal/paths/paths.go` (add `DebugLogPath`)
+- Create: `internal/debuglog/debuglog.go`
 - Create: `internal/hook/forward.go`
 - Modify: `internal/hook/hook.go` (call `forwardToAgent` near the end of `Run`, before `return 0`)
+- Test: `internal/debuglog/debuglog_test.go`
 - Test: `internal/hook/forward_test.go`
 
 **Interfaces:**
-- Consumes: `agentcfg.Read`.
-- Produces: `hook.forwardToAgent(source, sessionID, promptID, transcriptPath, cwd string)` — best-effort POST of a pointer to the local daemon; never returns an error, never blocks > 500ms, no-ops when `agent.json` is absent.
+- Consumes: `agentcfg.Read`, `paths.KeldHome`.
+- Produces:
+  - `paths.DebugLogPath() string` → `~/.keld/agent.log`.
+  - `debuglog.Append(format string, args ...any)` — best-effort timestamped line to the debug log; rotates to `<path>.1` when the active file reaches `debuglog.MaxBytes` (so total on-disk usage is bounded to ~2×MaxBytes); never returns an error, never panics, **never receives prompt text** from callers.
+  - `hook.forwardToAgent(source, sessionID, promptID, transcriptPath, cwd string)` — best-effort POST of a pointer to the local daemon; never returns an error, never blocks > 500ms, no-ops when `agent.json` is absent, and records POST transport errors / non-2xx responses via `debuglog.Append`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Add the debug-log path helper**
+
+In `internal/paths/paths.go`, add after `AgentInfoPath`:
+
+```go
+func DebugLogPath() string { return filepath.Join(KeldHome(), "agent.log") }
+```
+
+- [ ] **Step 2: Write the failing debuglog test**
+
+Create `internal/debuglog/debuglog_test.go`:
+
+```go
+package debuglog
+
+import (
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/ncx-ai/keld-cli/internal/paths"
+)
+
+func TestAppendWritesTimestampedLine(t *testing.T) {
+	t.Setenv("KELD_HOME", t.TempDir())
+	Append("hello %d", 7)
+	data, err := os.ReadFile(paths.DebugLogPath())
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(data), "hello 7") {
+		t.Fatalf("log missing line: %q", data)
+	}
+}
+
+func TestRotateWhenOverCap(t *testing.T) {
+	t.Setenv("KELD_HOME", t.TempDir())
+	old := MaxBytes
+	defer func() { MaxBytes = old }()
+	MaxBytes = 20
+
+	Append("first line, definitely over twenty bytes")
+	Append("second")
+
+	if _, err := os.Stat(paths.DebugLogPath() + ".1"); err != nil {
+		t.Fatalf("expected rotated file .1: %v", err)
+	}
+	data, _ := os.ReadFile(paths.DebugLogPath())
+	if !strings.Contains(string(data), "second") {
+		t.Fatalf("active log should hold the newest line: %q", data)
+	}
+}
+```
+
+- [ ] **Step 3: Run test to verify it fails**
+
+Run: `cd ~/keld/keld-cli && go test ./internal/debuglog/`
+Expected: FAIL (`Append`, `MaxBytes` undefined).
+
+- [ ] **Step 4: Write the debuglog implementation**
+
+Create `internal/debuglog/debuglog.go`:
+
+```go
+// Package debuglog writes a finite-size, best-effort debug log under ~/.keld.
+// It records otherwise-silent errors (e.g. hook->daemon POST failures) without
+// ever blocking the caller. Callers must never pass prompt text to it.
+package debuglog
+
+import (
+	"fmt"
+	"os"
+	"sync"
+	"time"
+
+	"github.com/ncx-ai/keld-cli/internal/paths"
+)
+
+// MaxBytes caps the active log file. When it is reached the file rotates to
+// <path>.1, bounding total on-disk usage to ~2*MaxBytes. Exported as a var so
+// tests can shrink it.
+var MaxBytes int64 = 1 << 20 // 1 MiB
+
+var mu sync.Mutex
+
+// Append writes a timestamped line. Best-effort: every error is swallowed.
+func Append(format string, args ...any) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if err := os.MkdirAll(paths.KeldHome(), 0o755); err != nil {
+		return
+	}
+	path := paths.DebugLogPath()
+	if st, err := os.Stat(path); err == nil && st.Size() >= MaxBytes {
+		_ = os.Rename(path, path+".1") // overwrites any previous .1
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(time.Now().UTC().Format(time.RFC3339) + " " + fmt.Sprintf(format, args...) + "\n")
+}
+```
+
+- [ ] **Step 5: Run test to verify it passes**
+
+Run: `cd ~/keld/keld-cli && go test ./internal/debuglog/`
+Expected: PASS.
+
+- [ ] **Step 6: Write the failing forward test**
 
 Create `internal/hook/forward_test.go`:
 
@@ -2426,10 +2549,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/ncx-ai/keld-cli/internal/agent/agentcfg"
+	"github.com/ncx-ai/keld-cli/internal/paths"
 )
 
 func TestForwardPostsPointerWithSecret(t *testing.T) {
@@ -2469,14 +2595,44 @@ func TestForwardNoopWhenAgentAbsent(t *testing.T) {
 	// Must not panic or block when agent.json is missing.
 	forwardToAgent("claude_code", "S1", "P1", "/t", "/cwd")
 }
+
+func TestForwardLogsNon2xxWithoutPromptText(t *testing.T) {
+	t.Setenv("KELD_HOME", t.TempDir())
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		w.WriteHeader(500)
+	}))
+	defer srv.Close()
+
+	u, _ := url.Parse(srv.URL)
+	port, _ := strconv.Atoi(u.Port())
+	if err := agentcfg.Write(agentcfg.Info{Port: port, Secret: "sek"}); err != nil {
+		t.Fatal(err)
+	}
+
+	forwardToAgent("claude_code", "S1", "P1", "/secret/transcript.jsonl", "/cwd")
+
+	data, err := os.ReadFile(paths.DebugLogPath())
+	if err != nil {
+		t.Fatalf("expected a debug log entry: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, "500") {
+		t.Fatalf("debug log should record the status: %q", s)
+	}
+	if strings.Contains(s, "/secret/transcript.jsonl") {
+		t.Fatalf("debug log must not contain the transcript path/content: %q", s)
+	}
+}
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 7: Run test to verify it fails**
 
 Run: `cd ~/keld/keld-cli && go test ./internal/hook/ -run TestForward`
 Expected: FAIL (`forwardToAgent` undefined).
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 8: Write the forward implementation**
 
 Create `internal/hook/forward.go`:
 
@@ -2492,11 +2648,13 @@ import (
 	"time"
 
 	"github.com/ncx-ai/keld-cli/internal/agent/agentcfg"
+	"github.com/ncx-ai/keld-cli/internal/debuglog"
 )
 
 // forwardToAgent best-effort POSTs an enrich pointer to the local daemon. It is
-// silent-skip: any error (no daemon, bad config, timeout) is swallowed so the
-// host tool is never affected.
+// silent-skip toward the host tool: it never returns an error and never blocks
+// it. POST transport errors / non-2xx responses are recorded in the finite-size
+// debug log (endpoint + status + prompt_id only — never prompt text).
 func forwardToAgent(source, sessionID, promptID, transcriptPath, cwd string) {
 	info, err := agentcfg.Read()
 	if err != nil || info == nil || info.Port == 0 || promptID == "" {
@@ -2522,13 +2680,17 @@ func forwardToAgent(source, sessionID, promptID, transcriptPath, cwd string) {
 	req.Header.Set("x-keld-agent-secret", info.Secret)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		debuglog.Append("forward: POST %s failed (prompt_id=%s): %v", url, promptID, err)
 		return
 	}
-	_ = resp.Body.Close()
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		debuglog.Append("forward: POST %s returned %d (prompt_id=%s)", url, resp.StatusCode, promptID)
+	}
 }
 ```
 
-- [ ] **Step 4: Wire the call into `Run`**
+- [ ] **Step 9: Wire the call into `Run`**
 
 In `internal/hook/hook.go`, locate the `ChangedSinceLast` block in `Run`. The function currently resolves `sessionID`, `cwd`, and `repo`. Add a `promptID` resolution after `sessionID` is resolved (find the line `sessionID = stringVal(hookInput, "thread_id")` block end) and a forward call before the final dedup/POST. Concretely, add after the `if sessionID == "" { return 0 }` guard:
 
@@ -2541,16 +2703,16 @@ In `internal/hook/hook.go`, locate the `ChangedSinceLast` block in `Run`. The fu
 	forwardToAgent(source, sessionID, promptID, transcriptPath, cwd)
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [ ] **Step 10: Run tests to verify they pass**
 
-Run: `cd ~/keld/keld-cli && go test ./internal/hook/`
-Expected: PASS (existing hook tests + new forward tests).
+Run: `cd ~/keld/keld-cli && go test ./internal/hook/ ./internal/debuglog/ ./internal/paths/`
+Expected: PASS (existing hook tests + new forward/debuglog tests + paths).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
-git add internal/hook/forward.go internal/hook/hook.go internal/hook/forward_test.go
-git commit -m "feat(hook): silent-skip forward of enrich pointer to local daemon"
+git add internal/paths/paths.go internal/debuglog/ internal/hook/forward.go internal/hook/hook.go internal/hook/forward_test.go
+git commit -m "feat(hook): forward enrich pointer to daemon + finite-size debug log for POST errors"
 ```
 
 ---

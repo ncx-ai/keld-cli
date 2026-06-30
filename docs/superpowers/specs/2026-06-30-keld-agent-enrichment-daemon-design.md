@@ -269,7 +269,8 @@ different sources never collide and so consumers can segment by origin.
   in-memory job. Masking is applied at extraction time, before the value can
   reach any sink.
 - Daemon binds `127.0.0.1` only; ingress requires a per-user shared secret.
-- No prompt text in logs (ids and lengths only).
+- No prompt text in logs, including the finite-size `~/.keld/agent.log` debug
+  log (ids, endpoints, and statuses only).
 - A dedicated leak test scans all outbound payloads + log output and asserts
   **zero** prompt-text content.
 
@@ -304,8 +305,12 @@ login (device flow opens browser)
 
 ## 10. Error handling
 
-- Hook → localhost POST: silent fire-and-forget, `<500ms` timeout; daemon down
-  ⇒ that prompt is simply unenriched. Never blocks or fails the host tool.
+- Hook → localhost POST: silent fire-and-forget toward the host tool, `<500ms`
+  timeout; daemon down ⇒ that prompt is simply unenriched. Never blocks or fails
+  the host tool. POST transport errors / non-2xx responses are recorded to a
+  **finite-size local debug log** (`~/.keld/agent.log`, rotated to bound size) —
+  endpoint + status + `prompt_id` only, never prompt text — so failures are
+  diagnosable instead of fully invisible.
 - Transcript read failure / format drift ⇒ skip enrichment, increment a metric,
   log a warning (no prompt text).
 - `Model` backend failure / per-extractor failure ⇒ deterministic backend, else
