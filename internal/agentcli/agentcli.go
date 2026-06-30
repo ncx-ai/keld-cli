@@ -3,6 +3,7 @@ package agentcli
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ncx-ai/keld-cli/internal/agent/daemon"
+	"github.com/ncx-ai/keld-cli/internal/agent/service"
 	"github.com/ncx-ai/keld-cli/internal/version"
 )
 
@@ -29,6 +31,28 @@ func NewRootCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			return daemon.Run(ctx)
+		},
+	})
+	root.AddCommand(&cobra.Command{
+		Use:   "install",
+		Short: "Install keld-agent as a per-user autostart service.",
+		RunE:  func(cmd *cobra.Command, args []string) error { return service.Install() },
+	})
+	root.AddCommand(&cobra.Command{
+		Use:   "uninstall",
+		Short: "Remove the keld-agent service.",
+		RunE:  func(cmd *cobra.Command, args []string) error { return service.Uninstall() },
+	})
+	root.AddCommand(&cobra.Command{
+		Use:   "status",
+		Short: "Show keld-agent service status.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := service.Status()
+			if err != nil {
+				return err
+			}
+			fmt.Println(s)
+			return nil
 		},
 	})
 	return root
