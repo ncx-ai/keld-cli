@@ -37,13 +37,21 @@ jobs:
         shell: bash
         run: bash sidecar/build-freeze.sh
 
+      - name: Cache HuggingFace model
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/hf-cache
+          key: hf-gliner2-large-v1-b122b11eeaee4dabd32bed80412f3234c0d0e943
+
       - name: Smoke the frozen sidecar
         shell: bash
+        env:
+          HF_HOME: ${{ github.workspace }}/hf-cache
         run: |
           BIN="dist/keld-agent-sidecar/keld-agent-sidecar"
           [ "${{ runner.os }}" = "Windows" ] && BIN="dist/keld-agent-sidecar/keld-agent-sidecar.exe"
           "$BIN" --port 8399 --host 127.0.0.1 &
-          for i in $(seq 1 150); do
+          for i in $(seq 1 180); do
             if curl -sf http://127.0.0.1:8399/health | grep -q '"ok":true'; then ok=1; break; fi
             sleep 2
           done
@@ -80,7 +88,7 @@ jobs:
           APPLE_NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
         run: |
           # Flatten sidecar one-dir beside keld-agent in the payload.
-          bash installers/macos/build-pkg.sh "${{ github.event.release.tag_name }}" stage
+          bash installers/macos/build-pkg.sh "${{ github.event.release.tag_name }}" stage "${{ matrix.goarch }}"
 
       - name: Package Windows installer
         if: matrix.os == 'windows-latest'
@@ -103,6 +111,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            keld-*.pkg
+            keld-*-*.pkg
             installers/windows/Output/keld-setup.exe
             keld-agent-sidecar_*.tar.gz

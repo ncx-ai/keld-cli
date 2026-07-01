@@ -8,5 +8,5 @@
   <choice id="default">
     <pkg-ref id="co.keld.agent"/>
   </choice>
-  <pkg-ref id="co.keld.agent" version="0">keld-component.pkg</pkg-ref>
+  <pkg-ref id="co.keld.agent" version="0">component.pkg</pkg-ref>
 </installer-gui-script>

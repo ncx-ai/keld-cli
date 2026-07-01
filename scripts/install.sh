@@ -76,13 +76,14 @@ fi
 # Fetch the frozen GLiNER2 sidecar (large, ~hundreds of MB) BY DEFAULT — this is
 # the full ML experience, matching the GUI installers. Set KELD_NO_SIDECAR=1 for
 # a lean, deterministic-only install (the deterministic backend needs no sidecar).
-if [ -f "${DEST}/keld-agent" ] && [ "${KELD_NO_SIDECAR:-0}" != "1" ]; then
+# Linux only: macOS uses the .pkg installer; no darwin sidecar tarball is published.
+if [ "$os" = "linux" ] && [ -f "${DEST}/keld-agent" ] && [ "${KELD_NO_SIDECAR:-0}" != "1" ]; then
   sc_archive="keld-agent-sidecar_${os}_${arch}.tar.gz"
   sc_url="https://github.com/${REPO}/releases/download/${tag}/${sc_archive}"
   echo "Fetching keld-agent-sidecar (large; set KELD_NO_SIDECAR=1 to skip)..."
   if curl -fsSL "$sc_url" | tar -xz -C "$DEST"; then
-    chmod +x "${DEST}/keld-agent-sidecar" 2>/dev/null || true
-    echo "keld-agent-sidecar installed to ${DEST}/keld-agent-sidecar"
+    chmod +x "${DEST}/keld-agent-sidecar/keld-agent-sidecar" 2>/dev/null || true
+    echo "keld-agent-sidecar installed to ${DEST}/keld-agent-sidecar/keld-agent-sidecar"
   else
     echo "keld: sidecar download failed; continuing with the deterministic backend." >&2
   fi
