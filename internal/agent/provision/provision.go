@@ -39,7 +39,13 @@ func EnsureModel(ctx context.Context, dir, wantSHA string, f Fetcher) error {
 	if got, err := fileSHA(filepath.Join(dir, sentinel)); err == nil && got == wantSHA {
 		return nil
 	}
-	tmp, err := os.MkdirTemp(filepath.Dir(dir), ".gliner2-dl-*")
+	// The staging temp dir is created next to the final dir; os.MkdirTemp requires
+	// that parent to already exist — on a fresh machine (~/.keld/models) it does not.
+	parent := filepath.Dir(dir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.MkdirTemp(parent, ".gliner2-dl-*")
 	if err != nil {
 		return err
 	}
@@ -55,8 +61,5 @@ func EnsureModel(ctx context.Context, dir, wantSHA string, f Fetcher) error {
 		return fmt.Errorf("model sha mismatch: got %s want %s", got, wantSHA)
 	}
 	_ = os.RemoveAll(dir)
-	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
-		return err
-	}
 	return os.Rename(tmp, dir)
 }
