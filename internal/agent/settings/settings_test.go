@@ -32,3 +32,15 @@ func TestLoadInvalidJSONReturnsDefaults(t *testing.T) {
 		t.Fatal("invalid JSON must yield defaults")
 	}
 }
+
+func TestMLEnabledDefaultsAuto(t *testing.T) {
+	if !(Settings{}).MLEnabled() {
+		t.Fatal("empty MLBackend should default to enabled (auto)")
+	}
+	if !(Settings{MLBackend: "auto"}).MLEnabled() {
+		t.Fatal("auto should be enabled")
+	}
+	if (Settings{MLBackend: "off"}).MLEnabled() {
+		t.Fatal("off should be disabled")
+	}
+}
