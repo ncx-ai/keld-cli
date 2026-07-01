@@ -50,9 +50,16 @@ prompts) while the sidecar + model provision in the background.
   `func New(baseURL string, timeout time.Duration) enrich.Model` — `Classify`,
   `Entities`, `Extract` call the sidecar over `localhost` HTTP and map JSON →
   `Ranked`/`Entity`/`ExtractResult`.
-- **Privacy invariant (from P1):** any sensitive-labeled entity is masked
-  (`Text` cleared, `Masked` set) before it leaves the client — never trust the
-  sidecar to have done it. Sensitivity label set matches `enrich`'s.
+- **Privacy invariant (from P1) — enforced by the pipeline, not the client.**
+  `SensitivityExtractor.Run` already masks backend-agnostically: it calls
+  `Model.Extract(...)` and builds `sensitivity_spans` dropping `Text` and setting
+  `Masked = enrich.Mask(label, text)`. So `sidecarClient` MUST mirror the
+  deterministic backend and return **raw** entities (`Text`, `Start`, `End`,
+  `Label`, `Confidence`); it must NOT pre-mask (clearing `Text` would degrade the
+  mask hint — no email domain / last-4). Raw prompt text crosses only the
+  loopback daemon→sidecar hop on the same machine; only masked spans are ever
+  published. A `sidecarClient` conforming to the `Model` contract preserves the
+  invariant automatically.
 - Per-call timeout; errors surface so the worker can fall back to deterministic.
 
 ## 5. Daemon lifecycle — supervision + health-gating
