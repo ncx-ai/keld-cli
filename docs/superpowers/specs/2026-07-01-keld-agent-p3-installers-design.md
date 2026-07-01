@@ -67,9 +67,10 @@ The model is **not** in the payload (first-run download with progress, P2b).
 ## 6. Linux — `curl | sh`
 
 - Extend the existing `scripts/install.sh` to also fetch + place
-  `keld-agent-sidecar` beside `keld`/`keld-agent`, then `systemctl --user
-  enable --now keld-agent` (P1 already does the service). `curl | sh` remains
-  the power-user path (no GUI).
+  `keld-agent-sidecar` beside `keld`/`keld-agent` **by default** (matching the
+  GUI installers), then `systemctl --user enable --now keld-agent` (P1 already
+  does the service). `KELD_NO_SIDECAR=1` opts out (lean deterministic-only).
+  `curl | sh` remains the power-user path (no GUI).
 - `.deb` / `.rpm` via **nfpm**: deferred (parent spec §9 "later").
 
 ## 7. Build / CI

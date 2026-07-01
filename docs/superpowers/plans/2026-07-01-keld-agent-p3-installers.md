@@ -13,7 +13,7 @@
 - **Only Task 1 (`sidecarBinPath`) is locally testable** in this Linux dev env. Tasks 2–6 (freeze, `.pkg`, Inno, CI) are **authored here and verified by a CI run** on the maintainer's macOS/Windows/Linux runners — do NOT claim they were built/tested locally; validate syntax where a linter exists (`sh -n`, `actionlint`/`yamllint` if present) and stop there.
 - **Unsigned-first:** every packaging step must produce an artifact with NO signing secrets present; signing/notarization runs only when the secrets exist and must be skipped cleanly when absent.
 - **Sidecar binary name is `keld-agent-sidecar`** everywhere (fixes the current `keld-sidecar` mismatch in `daemon.go`).
-- **The frozen sidecar is a separate release asset** (built by PyInstaller in CI, NOT GoReleaser). GUI installers (`.pkg`/Inno) **bundle** it; `curl|sh` treats it as **opt-in** (`KELD_WITH_SIDECAR=1`) because it is hundreds of MB and the deterministic backend works without it.
+- **The frozen sidecar is a separate release asset** (built by PyInstaller in CI, NOT GoReleaser). GUI installers (`.pkg`/Inno) **bundle** it, and `curl|sh` **installs it by default too** (the full ML experience out of the box). It is hundreds of MB, so `curl|sh` provides a `KELD_NO_SIDECAR=1` **opt-out** for a lean deterministic-only install; the deterministic backend works without it.
 - **Runtime unchanged:** no edits to the P1/P2 enrichment runtime beyond `sidecarBinPath()`. Deterministic stays the default; ML dormant until the sidecar binary is installed.
 - **No custom GUI app** (native installer wizards suffice); **nfpm `.deb`/`.rpm` deferred**; the installer never performs login.
 
@@ -326,17 +326,18 @@ end;
 
 **Files:** Modify `scripts/install.sh`.
 
-**Interfaces:** Adds an opt-in (`KELD_WITH_SIDECAR=1`) fetch of the `keld-agent-sidecar_${os}_${arch}.tar.gz` release asset, extracted beside `keld-agent` in `$DEST`. Default (unset) behavior is unchanged.
+**Interfaces:** By **default** fetches the `keld-agent-sidecar_${os}_${arch}.tar.gz` release asset and extracts it beside `keld-agent` in `$DEST`. `KELD_NO_SIDECAR=1` **opts out** (lean deterministic-only install). A failed fetch is non-fatal (continues on the deterministic backend).
 
 - [ ] **Step 1: Add the sidecar fetch** after the existing `keld-agent` chmod/service block:
 
 ```sh
-# Optional: fetch the frozen GLiNER2 sidecar (large, ~hundreds of MB). Opt-in —
-# the deterministic backend works without it; the GUI installers bundle it.
-if [ "${KELD_WITH_SIDECAR:-0}" = "1" ]; then
+# Fetch the frozen GLiNER2 sidecar (large, ~hundreds of MB) BY DEFAULT — this is
+# the full ML experience, matching the GUI installers. Set KELD_NO_SIDECAR=1 for
+# a lean, deterministic-only install (the deterministic backend needs no sidecar).
+if [ "${KELD_NO_SIDECAR:-0}" != "1" ]; then
   sc_archive="keld-agent-sidecar_${os}_${arch}.tar.gz"
   sc_url="https://github.com/${REPO}/releases/download/${tag}/${sc_archive}"
-  echo "Fetching keld-agent-sidecar (this is large)..."
+  echo "Fetching keld-agent-sidecar (large; set KELD_NO_SIDECAR=1 to skip)..."
   if curl -fsSL "$sc_url" | tar -xz -C "$DEST"; then
     chmod +x "${DEST}/keld-agent-sidecar" 2>/dev/null || true
     echo "keld-agent-sidecar installed to ${DEST}/keld-agent-sidecar"
@@ -346,7 +347,7 @@ if [ "${KELD_WITH_SIDECAR:-0}" = "1" ]; then
 fi
 ```
 
-- [ ] **Step 2: Verify** — `sh -n scripts/install.sh` (POSIX syntax OK). Confirm the default path (var unset) is byte-unchanged in behavior (the block is skipped).
+- [ ] **Step 2: Verify** — `sh -n scripts/install.sh` (POSIX syntax OK). Confirm `KELD_NO_SIDECAR=1` skips the block and the default path attempts the fetch.
 
 - [ ] **Step 3: Commit** — `git add scripts/install.sh && git commit -m "build(linux): opt-in keld-agent-sidecar fetch in install.sh"`
 
