@@ -51,6 +51,19 @@ func TestEnsureModelSkipsWhenPresentValid(t *testing.T) {
 	}
 }
 
+// Regression: on a fresh machine the model dir's PARENT (e.g. ~/.keld/models)
+// doesn't exist yet; EnsureModel must create it, not fail in os.MkdirTemp.
+func TestEnsureModelCreatesMissingParent(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "does", "not", "exist", "gliner2")
+	content := []byte("weights")
+	if err := EnsureModel(t.Context(), dir, sha(content), fakeFetcher{content}); err != nil {
+		t.Fatalf("EnsureModel should create the missing parent: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "model.safetensors")); err != nil {
+		t.Fatal("model not installed under the created parent")
+	}
+}
+
 type errFetcher struct{}
 
 func (errFetcher) Fetch(context.Context, string) error { return os.ErrPermission }
