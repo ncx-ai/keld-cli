@@ -51,16 +51,15 @@ func (g *Governor) Concurrency() int {
 }
 
 // Admit sheds a fraction of work proportional to overload above highMark.
+// Admit rate = 1/keep, so a larger keep sheds more.
 func (g *Governor) Admit() bool {
 	if g.ewma < highMark {
 		return true
 	}
-	// keep 1 of every N; N grows with overload (85->keep most, 100->shed ~half)
-	keep := uint64(2)
+	// admit rate = 1/keep: larger keep means more shedding
+	keep := uint64(2) // 85 <= ewma < 95: admit ~1/2
 	if g.ewma >= 95 {
-		keep = 2
-	} else {
-		keep = 4
+		keep = 4 // severe: admit ~1/4 (shed more)
 	}
 	g.tick++
 	return g.tick%keep == 0

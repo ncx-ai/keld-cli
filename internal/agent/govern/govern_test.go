@@ -37,3 +37,23 @@ func TestAdmitShedsUnderSustainedHighLoad(t *testing.T) {
 		t.Fatal("sustained high load should shed some admissions")
 	}
 }
+
+func TestAdmitShedsMoreUnderHigherLoad(t *testing.T) {
+	mk := func(load float64) int {
+		g := New(nil, 4)
+		for i := 0; i < 30; i++ {
+			g.Observe(load)
+		}
+		admits := 0
+		for i := 0; i < 100; i++ {
+			if g.Admit() {
+				admits++
+			}
+		}
+		return admits
+	}
+	a99, a88 := mk(99), mk(88)
+	if !(a99 < a88 && a88 < 100) {
+		t.Fatalf("severe load must shed more: admits@99=%d admits@88=%d (want a99<a88<100)", a99, a88)
+	}
+}
