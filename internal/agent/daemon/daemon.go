@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -83,19 +85,48 @@ func process(j queue.Job, m enrich.Model, pub Sender, actor string, includeEntit
 }
 
 // sidecarBinPath returns the path to the sidecar binary and whether it exists.
-// It checks KELD_SIDECAR_BIN env override first, then a well-known path.
+// Resolution order: (1) KELD_SIDECAR_BIN env (if it exists); (2) keld-agent-sidecar
+// beside os.Executable(); (3) per-OS well-known locations.
 func sidecarBinPath() (string, bool) {
 	if p := os.Getenv("KELD_SIDECAR_BIN"); p != "" {
-		if _, err := os.Stat(p); err == nil {
+		if statExists(p) {
 			return p, true
 		}
 	}
-	// Well-known path alongside the keld binary (not required to exist).
-	const wellKnown = "/usr/local/bin/keld-sidecar"
-	if _, err := os.Stat(wellKnown); err == nil {
-		return wellKnown, true
+	name := "keld-agent-sidecar"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	// (2) beside the running keld-agent executable (how the installers lay it out).
+	if exe, err := os.Executable(); err == nil {
+		if p := filepath.Join(filepath.Dir(exe), name); statExists(p) {
+			return p, true
+		}
+	}
+	// (3) per-OS well-known fallback.
+	for _, p := range wellKnownSidecarPaths(name) {
+		if statExists(p) {
+			return p, true
+		}
 	}
 	return "", false
+}
+
+func statExists(p string) bool { _, err := os.Stat(p); return err == nil }
+
+func wellKnownSidecarPaths(name string) []string {
+	home, _ := os.UserHomeDir()
+	switch runtime.GOOS {
+	case "darwin":
+		return []string{"/usr/local/bin/" + name, filepath.Join(home, ".local/bin", name)}
+	case "windows":
+		if la := os.Getenv("LOCALAPPDATA"); la != "" {
+			return []string{filepath.Join(la, "Programs", "keld", name)}
+		}
+		return nil
+	default: // linux
+		return []string{filepath.Join(home, ".local/bin", name), "/usr/local/bin/" + name}
+	}
 }
 
 // Run starts the daemon: ingress on loopback, worker, agent.json discovery file.
