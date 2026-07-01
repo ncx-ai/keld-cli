@@ -7,11 +7,15 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/ncx-ai/keld-cli/internal/agent/agentcfg"
 	"github.com/ncx-ai/keld-cli/internal/agent/enrich"
+	"github.com/ncx-ai/keld-cli/internal/agent/enrich/sidecar"
+	"github.com/ncx-ai/keld-cli/internal/agent/govern"
 	"github.com/ncx-ai/keld-cli/internal/agent/ingress"
 	"github.com/ncx-ai/keld-cli/internal/agent/publish"
 	"github.com/ncx-ai/keld-cli/internal/agent/queue"
@@ -28,11 +32,23 @@ type Sender interface {
 
 // Worker consumes jobs, resolves text, enriches, and publishes. It is
 // panic-isolated per job so one bad prompt never kills the daemon.
-func Worker(q *queue.Queue, m enrich.Model, pub Sender, actor string, includeEntityText bool) {
+// ready is a readiness gate: Worker blocks before processing each job until
+// ready() returns true. The block exits promptly when the queue is closed.
+func Worker(q *queue.Queue, m enrich.Model, pub Sender, actor string, includeEntityText bool, ready func() bool) {
 	for {
 		j, ok := q.Next()
 		if !ok {
 			return
+		}
+		// Wait until the backend is ready. Poll with a short sleep; break out
+		// immediately if the queue is closed so shutdown is never blocked.
+		for !ready() {
+			select {
+			case <-q.Done():
+				// Queue closed; discard the in-hand job and exit.
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
 		}
 		process(j, m, pub, actor, includeEntityText)
 	}
@@ -53,6 +69,22 @@ func process(j queue.Job, m enrich.Model, pub Sender, actor string, includeEntit
 	if err := pub.Send(e); err != nil {
 		log.Printf("keld-agent: publish failed for %s: %v", j.Key(), err)
 	}
+}
+
+// sidecarBinPath returns the path to the sidecar binary and whether it exists.
+// It checks KELD_SIDECAR_BIN env override first, then a well-known path.
+func sidecarBinPath() (string, bool) {
+	if p := os.Getenv("KELD_SIDECAR_BIN"); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p, true
+		}
+	}
+	// Well-known path alongside the keld binary (not required to exist).
+	const wellKnown = "/usr/local/bin/keld-sidecar"
+	if _, err := os.Stat(wellKnown); err == nil {
+		return wellKnown, true
+	}
+	return "", false
 }
 
 // Run starts the daemon: ingress on loopback, worker, agent.json discovery file.
@@ -87,7 +119,86 @@ func Run(ctx context.Context) error {
 	}
 	log.Printf("keld-agent: listening on 127.0.0.1:%d", port)
 
-	go Worker(q, enrich.NewDeterministic(), pub, actor, set.IncludeEntityText)
+	binPath, hasBin := sidecarBinPath()
+	if set.MLEnabled() && hasBin {
+		// Pick an ephemeral port for the sidecar.
+		scLn, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			log.Printf("keld-agent: sidecar port alloc failed, using deterministic: %v", err)
+			goto deterministicPath
+		}
+		scPort := scLn.Addr().(*net.TCPAddr).Port
+		scLn.Close() // Release; sidecar will bind it.
+
+		scBaseURL := fmt.Sprintf("http://127.0.0.1:%d", scPort)
+		scClient := sidecar.New(scBaseURL, 5*time.Second)
+
+		healthFn := func() bool { return scClient.Healthy(ctx) }
+
+		sup := NewSupervisor(
+			func(p int) (*exec.Cmd, error) {
+				cmd := exec.CommandContext(ctx, binPath,
+					fmt.Sprintf("--port=%d", p),
+				)
+				return cmd, nil
+			},
+			scPort,
+			healthFn,
+			30*time.Second,
+		)
+
+		go sup.Start(ctx)
+
+		// Kick provisioning in a background goroutine (stub — real HF fetcher
+		// is Task 9). This must not block Run or crash when no model is present.
+		go func() {
+			// No-op stub: real provisioning wired when Fetcher is available.
+			_ = binPath
+		}()
+
+		// Governor: observe host CPU every 5 s. The sampler is nil (no real
+		// CPU sampler yet); Sample() is a no-op in that case.
+		g := govern.New(nil, 4)
+		go func() {
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					g.Sample()
+				}
+			}
+		}()
+
+		// Router: use sidecar when healthy, else deterministic.
+		router := enrich.NewRouter(scClient, enrich.NewDeterministic(), healthFn)
+
+		// Worker gate: hold until sidecar is ready OR fell back (i.e. we know
+		// which path to take).
+		gate := func() bool { return sup.Ready() || sup.FellBack() }
+
+		go Worker(q, router, pub, actor, set.IncludeEntityText, gate)
+
+		srv := &http.Server{Handler: ingress.Handler(q, secret)}
+		go func() {
+			<-ctx.Done()
+			shutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_ = srv.Shutdown(shutCtx)
+			q.Close()
+		}()
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	}
+
+deterministicPath:
+	// ML off or no sidecar binary: deterministic path, always-ready gate.
+	// This is behaviorally identical to the original Run.
+	go Worker(q, enrich.NewDeterministic(), pub, actor, set.IncludeEntityText, func() bool { return true })
 
 	srv := &http.Server{Handler: ingress.Handler(q, secret)}
 	go func() {

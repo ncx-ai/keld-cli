@@ -25,6 +25,7 @@ func (j Job) Key() string { return j.Source + "|" + j.Scheme + "|" + j.ID }
 type Queue struct {
 	mu       sync.Mutex
 	ch       chan Job
+	done     chan struct{}
 	inflight map[string]bool
 	dropped  int
 	closed   bool
@@ -35,8 +36,13 @@ func New(capacity int) *Queue {
 	if capacity < 1 {
 		capacity = 1
 	}
-	return &Queue{ch: make(chan Job, capacity), inflight: map[string]bool{}}
+	return &Queue{ch: make(chan Job, capacity), done: make(chan struct{}), inflight: map[string]bool{}}
 }
+
+// Done returns a channel that is closed when the queue is closed. Callers can
+// select on Done() to detect shutdown while blocked elsewhere (e.g. a readiness
+// poll loop).
+func (q *Queue) Done() <-chan struct{} { return q.done }
 
 // Offer enqueues a job. It returns false (and counts a drop) when the queue is
 // full; it returns false WITHOUT counting a drop when the key is already queued.
@@ -77,6 +83,7 @@ func (q *Queue) Close() {
 	if !q.closed {
 		q.closed = true
 		close(q.ch)
+		close(q.done)
 	}
 }
 
