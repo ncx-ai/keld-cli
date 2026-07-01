@@ -17,15 +17,18 @@ func TestRunModelOnDeterministicBaseline(t *testing.T) {
 	}
 	m := Score(gold, pred, []string{"task_type", "domain", "sensitivity"})
 
-	// The deterministic backend has strong regex priors for SSN + API keys, so
-	// it must catch BOTH sensitive gold rows (missing a secret is the costly error).
-	if got := m["sensitivity"]["sensitive_recall"]; got < 1.0 {
-		t.Fatalf("deterministic sensitive_recall = %v, want 1.0 (SSN->phi, api key->secrets)", got)
+	// Diagnostic baseline over the expanded gold set. The deterministic backend
+	// catches the regex-detectable sensitive rows (SSN, API keys, credit cards,
+	// email/phone) but NOT the ones with no lexical signal (proprietary roadmaps,
+	// address-only PII, MRN-based PHI). So sensitive_recall is > 0 but < 1 here —
+	// that gap is exactly what the GLiNER2 sidecar is expected to close (see the
+	// build-tagged sidecar eval gate). Assert the value is sane and record it.
+	got := m["sensitivity"]["sensitive_recall"]
+	if got <= 0.0 || got > 1.0 {
+		t.Fatalf("deterministic sensitive_recall = %v, want in (0,1]", got)
 	}
-	// task_type accuracy is a baseline signal, not a hard gate here; just require
-	// the runner actually produced predictions the scorer can read.
 	if _, ok := m["task_type"]["accuracy"]; !ok {
 		t.Fatal("task_type accuracy missing")
 	}
-	t.Logf("deterministic baseline: %+v", m)
+	t.Logf("deterministic baseline over %d gold rows: %+v", len(gold), m)
 }

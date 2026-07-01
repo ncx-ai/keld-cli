@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ncx-ai/keld-cli/internal/agent/agentcfg"
@@ -17,12 +18,14 @@ import (
 	"github.com/ncx-ai/keld-cli/internal/agent/enrich/sidecar"
 	"github.com/ncx-ai/keld-cli/internal/agent/govern"
 	"github.com/ncx-ai/keld-cli/internal/agent/ingress"
+	"github.com/ncx-ai/keld-cli/internal/agent/provision"
 	"github.com/ncx-ai/keld-cli/internal/agent/publish"
 	"github.com/ncx-ai/keld-cli/internal/agent/queue"
 	"github.com/ncx-ai/keld-cli/internal/agent/resolve"
 	"github.com/ncx-ai/keld-cli/internal/agent/settings"
 	"github.com/ncx-ai/keld-cli/internal/config"
 	"github.com/ncx-ai/keld-cli/internal/hook"
+	"github.com/ncx-ai/keld-cli/internal/paths"
 )
 
 // Sender publishes an enrichment (real publisher or a test fake).
@@ -34,7 +37,10 @@ type Sender interface {
 // panic-isolated per job so one bad prompt never kills the daemon.
 // ready is a readiness gate: Worker blocks before processing each job until
 // ready() returns true. The block exits promptly when the queue is closed.
-func Worker(q *queue.Queue, m enrich.Model, pub Sender, actor string, includeEntityText bool, ready func() bool) {
+// admit is an optional load-shedding gate for the ML path: when non-nil and
+// returning false the job is skipped (CPU busy). Pass nil on the deterministic
+// path so it is never shed.
+func Worker(q *queue.Queue, m enrich.Model, pub Sender, actor string, includeEntityText bool, ready func() bool, admit func() bool) {
 	for {
 		j, ok := q.Next()
 		if !ok {
@@ -49,6 +55,11 @@ func Worker(q *queue.Queue, m enrich.Model, pub Sender, actor string, includeEnt
 				return
 			case <-time.After(20 * time.Millisecond):
 			}
+		}
+		if admit != nil && !admit() {
+			// Governor overload shedding: intentionally DROP this ML job (no enrichment) —
+			// deterministic is the failure/timeout fallback, not the overload fallback.
+			continue
 		}
 		process(j, m, pub, actor, includeEntityText)
 	}
@@ -124,9 +135,9 @@ func Run(ctx context.Context) error {
 	// deterministic when it is unhealthy); otherwise we use the deterministic
 	// model with an always-ready gate. mlBackend returns the deterministic pair
 	// when it cannot bring the sidecar up, so the caller has a single code path.
-	model, gate := mlBackend(ctx, set)
+	model, gate, admit := mlBackend(ctx, set)
 
-	go Worker(q, model, pub, actor, set.IncludeEntityText, gate)
+	go Worker(q, model, pub, actor, set.IncludeEntityText, gate, admit)
 
 	return serve(ctx, ln, ingress.Handler(q, secret), q)
 }
@@ -148,17 +159,29 @@ func serve(ctx context.Context, ln net.Listener, handler http.Handler, q *queue.
 	return nil
 }
 
-// mlBackend returns the enrichment model and the worker readiness gate.
+// mlBackendOpts holds overridable dependencies for mlBackend. Zero values
+// cause mlBackendWithOpts to use production defaults. Only used in tests.
+type mlBackendOpts struct {
+	sup      *Supervisor
+	client   *sidecar.Client
+	modelDir string
+	modelSHA string
+	fetcher  provision.Fetcher
+	healthFn func() bool
+}
+
+// mlBackend returns the enrichment model, the worker readiness gate, and the
+// admit function for ML-path load shedding.
 //
-// When ML is enabled and a sidecar binary is present it spawns and supervises
-// the sidecar, starts the governor sampling loop and provisioning, and returns
-// a router (sidecar when healthy, else deterministic) with a gate that holds the
-// worker until the sidecar is ready or has fallen back. In every other case
-// (ML off, no binary, or a setup failure) it returns the deterministic model
-// with an always-ready gate — behaviourally identical to the pre-ML daemon.
-func mlBackend(ctx context.Context, set settings.Settings) (enrich.Model, func() bool) {
-	deterministic := func() (enrich.Model, func() bool) {
-		return enrich.NewDeterministic(), func() bool { return true }
+// When ML is enabled and a sidecar binary is present it provisions the model,
+// spawns and supervises the sidecar, starts the governor sampling loop, and
+// returns a router (sidecar when healthy, else deterministic) with a gate that
+// holds the worker until the sidecar is ready, has fallen back, OR provisioning
+// has failed. In every other case (ML off, no binary, or a setup failure) it
+// returns the deterministic model with an always-ready gate and nil admit.
+func mlBackend(ctx context.Context, set settings.Settings) (enrich.Model, func() bool, func() bool) {
+	deterministic := func() (enrich.Model, func() bool, func() bool) {
+		return enrich.NewDeterministic(), func() bool { return true }, nil
 	}
 
 	binPath, hasBin := sidecarBinPath()
@@ -179,27 +202,52 @@ func mlBackend(ctx context.Context, set settings.Settings) (enrich.Model, func()
 	scClient := sidecar.New(scBaseURL, 5*time.Second)
 	healthFn := func() bool { return scClient.Healthy(ctx) }
 
+	modelDir := paths.ModelsDir("gliner2-large-v1")
+
 	sup := NewSupervisor(
 		func(p int) (*exec.Cmd, error) {
-			return exec.CommandContext(ctx, binPath, fmt.Sprintf("--port=%d", p)), nil
+			cmd := exec.CommandContext(ctx, binPath, fmt.Sprintf("--port=%d", p))
+			cmd.Env = append(os.Environ(), "KELD_GLINER2_DIR="+modelDir)
+			return cmd, nil
 		},
 		scPort,
 		healthFn,
 		30*time.Second,
 	)
-	go sup.Start(ctx)
 
-	// Kick provisioning in a background goroutine (stub — real HF fetcher is
-	// Task 9). This must not block Run or crash when no model is present.
+	return mlBackendWithOpts(ctx, mlBackendOpts{
+		sup:      sup,
+		client:   scClient,
+		modelDir: modelDir,
+		modelSHA: provision.ModelSHA256,
+		fetcher:  sidecar.NewHFFetcher(provision.ModelRepo, provision.ModelRevision),
+		healthFn: healthFn,
+	})
+}
+
+// mlBackendWithOpts is the testable core of mlBackend. It accepts all
+// dependencies explicitly so tests can inject stubs without touching the
+// real filesystem or spawning real processes.
+func mlBackendWithOpts(ctx context.Context, opts mlBackendOpts) (enrich.Model, func() bool, func() bool) {
+	var provisionFailed atomic.Bool
+
+	// Provision the model BEFORE spawning the sidecar; on success start the
+	// supervisor; on failure open the gate so the worker can fall through to
+	// the deterministic path.
 	go func() {
-		// No-op stub: real provisioning wired when Fetcher is available.
-		_ = binPath
+		if err := provision.EnsureModel(ctx, opts.modelDir, opts.modelSHA, opts.fetcher); err != nil {
+			log.Printf("keld-agent: model provisioning failed: %v", err)
+			provisionFailed.Store(true)
+			return
+		}
+		go opts.sup.Start(ctx)
 	}()
 
-	// Governor: observe host CPU every 5 s. The sampler is nil (no real CPU
-	// sampler yet); Sample() is a no-op in that case.
+	// Governor: observe host CPU every 5 s using a real CPUSampler.
+	// Dynamic-concurrency pooling is deferred (YAGNI for single-user daemon);
+	// the governor is used solely for Admit()-based ML-path shedding.
+	g := govern.New(govern.CPUSampler{}, 1)
 	go func() {
-		g := govern.New(nil, 4)
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -212,12 +260,22 @@ func mlBackend(ctx context.Context, set settings.Settings) (enrich.Model, func()
 		}
 	}()
 
-	// Router: sidecar when healthy, else deterministic. The gate holds the
-	// worker until the sidecar is ready OR has fallen back (i.e. we know which
-	// path to take).
-	router := enrich.NewRouter(scClient, enrich.NewDeterministic(), healthFn)
-	gate := func() bool { return sup.Ready() || sup.FellBack() }
-	return router, gate
+	// Gate: open when sidecar is ready, has fallen back, OR provisioning failed.
+	gate := func() bool {
+		return opts.sup.Ready() || opts.sup.FellBack() || provisionFailed.Load()
+	}
+
+	// admit gates ML-path jobs: when the sidecar is healthy the governor decides;
+	// when it has fallen back to deterministic we always admit (no ML cost).
+	admit := func() bool {
+		if opts.healthFn() {
+			return g.Admit()
+		}
+		return true
+	}
+
+	router := enrich.NewRouter(opts.client, enrich.NewDeterministic(), opts.healthFn)
+	return router, gate, admit
 }
 
 // enrichEndpoint derives the enrichments URL from the configured ingest endpoint

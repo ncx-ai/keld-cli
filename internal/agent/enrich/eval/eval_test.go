@@ -29,15 +29,25 @@ func TestScoreSensitiveRecallAllNoneIsOne(t *testing.T) {
 	}
 }
 
-func TestLoadGoldReadsEightRows(t *testing.T) {
+func TestLoadGoldReadsExpandedSet(t *testing.T) {
 	g, err := LoadGold()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(g) != 8 {
-		t.Fatalf("gold rows = %d, want 8", len(g))
+	if len(g) < 50 {
+		t.Fatalf("gold rows = %d, want >= 50 (expanded set)", len(g))
 	}
 	if g[3].Sensitivity != "phi" || g[4].Sensitivity != "secrets" {
 		t.Fatalf("unexpected gold sensitivity: %q %q", g[3].Sensitivity, g[4].Sensitivity)
+	}
+	// Every sensitivity class must be represented so sensitive_recall is meaningful.
+	seen := map[string]bool{}
+	for _, r := range g {
+		seen[r.Sensitivity] = true
+	}
+	for _, want := range []string{"none", "pii", "secrets", "phi", "pci", "proprietary"} {
+		if !seen[want] {
+			t.Fatalf("gold set missing sensitivity class %q", want)
+		}
 	}
 }
