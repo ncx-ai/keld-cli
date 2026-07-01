@@ -7,6 +7,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"strings"
+
+	"github.com/ncx-ai/keld-cli/internal/agent/enrich"
 )
 
 //go:embed gold.jsonl
@@ -109,4 +111,19 @@ func Score(gold []GoldRow, pred []Pred, fields []string) map[string]map[string]f
 		metrics[f] = entry
 	}
 	return metrics
+}
+
+// RunModel scores a backend by running the enrichment pipeline over each gold
+// row and extracting the classified fields.
+func RunModel(m enrich.Model, gold []GoldRow) []Pred {
+	pred := make([]Pred, 0, len(gold))
+	for _, g := range gold {
+		p := enrich.Run(g.Text, "eval", m)
+		pred = append(pred, Pred{
+			TaskType:    p.TaskType.Value,
+			Domain:      p.Domain.Value,
+			Sensitivity: p.Sensitivity.Value,
+		})
+	}
+	return pred
 }
