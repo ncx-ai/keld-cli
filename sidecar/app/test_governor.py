@@ -33,7 +33,7 @@ def test_observe_ewma_first_sample_seeds():
 
 
 def test_await_slot_paces_by_interval():
-    # Fake clock + fake sleep: assert the second start waits ~max_interval.
+    # Fake clock + fake sleep: assert first call never waits, second call waits ~max_interval.
     t = {"now": 0.0}
     waited = []
 
@@ -46,10 +46,10 @@ def test_await_slot_paces_by_interval():
     g.observe(99.0)  # force max interval
 
     async def run():
-        await g.await_slot()      # first: last_start=0, no prior wait
+        await g.await_slot()      # first: no prior start, must not wait
         await g.await_slot()      # second: must wait ~2.0s
     asyncio.run(run())
-    assert waited and abs(waited[-1] - 2.0) < 1e-9
+    assert waited == [2.0] or (len(waited) == 1 and abs(waited[0] - 2.0) < 1e-9)
 
 
 def test_await_slot_noop_when_disabled():

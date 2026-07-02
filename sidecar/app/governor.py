@@ -36,7 +36,7 @@ class Governor:
         self._clock, self._sleep, self._sampler = clock, sleep, sampler
         self._ewma = 0.0
         self._seen = False
-        self._last_start = 0.0
+        self._last_start = None
 
     @property
     def ewma(self) -> float:
@@ -62,7 +62,8 @@ class Governor:
     async def await_slot(self) -> None:
         if self._disabled:
             return
-        wait = self._last_start + self.interval_for(self._ewma) - self._clock()
-        if wait > 0:
-            await self._sleep(wait)
+        if self._last_start is not None:
+            wait = self._last_start + self.interval_for(self._ewma) - self._clock()
+            if wait > 0:
+                await self._sleep(wait)
         self._last_start = self._clock()
