@@ -20,6 +20,7 @@ class InferenceRunner:
         self._queue = asyncio.Queue(maxsize=queue_max)
         self._executor = ThreadPoolExecutor(max_workers=1)
         self._consumer = None
+        self._stopped = False
 
     @property
     def ready(self) -> bool:
@@ -30,6 +31,10 @@ class InferenceRunner:
             self._consumer = asyncio.create_task(self._run())
 
     async def submit(self, fn, *args):
+        if self._stopped:
+            # Shutting down: nothing will run this. Callers treat QueueFull as
+            # "unavailable" (503), which is the right signal during shutdown.
+            raise QueueFull()
         loop = asyncio.get_running_loop()
         future = loop.create_future()
         try:
@@ -54,6 +59,9 @@ class InferenceRunner:
                 self._queue.task_done()
 
     async def stop(self) -> None:
+        # Reject any new submits before we tear down, so callers fail fast
+        # instead of enqueueing work that will never run.
+        self._stopped = True
         if self._consumer is not None:
             self._consumer.cancel()
             try:
@@ -61,4 +69,14 @@ class InferenceRunner:
             except asyncio.CancelledError:
                 pass
             self._consumer = None
+        # Drain queued-but-not-yet-run work: fail their awaiting callers rather
+        # than leaving `await future` in submit() to hang forever.
+        while True:
+            try:
+                _fn, _args, future = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if not future.cancelled():
+                future.set_exception(RuntimeError("runner stopped"))
+            self._queue.task_done()
         self._executor.shutdown(wait=False)

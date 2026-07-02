@@ -54,7 +54,6 @@ def test_single_flight_never_overlaps():
 
 
 def test_queue_full_rejects():
-    started = asyncio.Event()
     release = threading.Event()
 
     def block(_):
@@ -98,6 +97,45 @@ def test_exception_propagates():
             assert raised
         finally:
             await r.stop()
+    asyncio.run(run())
+
+
+def test_stop_fails_queued_submit():
+    release = threading.Event()
+
+    def block(_):
+        # Occupies the single consumer until stop() releases us.
+        release.wait(2.0)
+        return 1
+
+    async def run():
+        r = InferenceRunner(_NoWaitGov(), queue_max=8)
+        r.start()
+        try:
+            # First submit occupies the consumer; give it a beat to dequeue.
+            first = asyncio.create_task(r.submit(block, 0))
+            await asyncio.sleep(0.05)
+            # Second submit sits in the queue (consumer is busy).
+            second = asyncio.create_task(r.submit(block, 1))
+            await asyncio.sleep(0.05)
+            # Stop must drain the queued submit so its awaiter fails fast
+            # instead of hanging forever.
+            release.set()
+            await r.stop()
+            raised = False
+            try:
+                await asyncio.wait_for(second, timeout=2.0)
+            except RuntimeError:
+                raised = True
+            assert raised, "expected queued submit to fail after stop()"
+            # First submit's future was already dequeued; cancel to clean up.
+            first.cancel()
+            try:
+                await first
+            except (asyncio.CancelledError, RuntimeError):
+                pass
+        finally:
+            release.set()
     asyncio.run(run())
 
 
