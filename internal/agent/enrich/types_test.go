@@ -15,7 +15,7 @@ func TestEntityJSONOmitsEmptyTextAndMasked(t *testing.T) {
 }
 
 func TestJobContextSetGet(t *testing.T) {
-	ctx := NewJobContext("hello", "claude_code", nil)
+	ctx := NewJobContext("hello", "claude_code", Meta{}, nil)
 	ctx.Set("task_type", map[string]any{"k": "v"})
 	if got := ctx.Get("task_type"); got["k"] != "v" {
 		t.Fatalf("Get mismatch: %+v", got)

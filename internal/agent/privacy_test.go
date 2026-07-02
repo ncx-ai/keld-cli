@@ -14,7 +14,7 @@ import (
 // The end-to-end payload must never contain raw prompt text or raw secrets.
 func TestNoRawTextOrSecretInPublishedPayload(t *testing.T) {
 	raw := "translate this and here is my password: hunter2SuperSecretValue and email a@b.com"
-	p := enrich.Run(raw, "claude_code", enrich.NewDeterministic())
+	p := enrich.Run(raw, "claude_code", enrich.Meta{}, enrich.NewDeterministic())
 	j := queue.Job{Source: "claude_code", Scheme: "prompt_id", ID: "X"}
 	e := publish.Build(j, p, "dg@keld.co", false, time.Unix(0, 0).UTC())
 

@@ -14,7 +14,7 @@ import (
 )
 
 func TestBuildShapeAndNoRawText(t *testing.T) {
-	p := enrich.Run("key sk-live-ABCDEF0123456789 and write a function", "claude_code", enrich.NewDeterministic())
+	p := enrich.Run("key sk-live-ABCDEF0123456789 and write a function", "claude_code", enrich.Meta{}, enrich.NewDeterministic())
 	j := queue.Job{Source: "claude_code", Scheme: "prompt_id", ID: "X", SessionID: "S", Origin: "hook", Version: "2.1"}
 	e := Build(j, p, "dg@keld.co", false, time.Unix(0, 0).UTC())
 

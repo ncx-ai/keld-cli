@@ -20,8 +20,8 @@ func runStage(ex Extractor, ctx *JobContext) (out map[string]any, ok bool) {
 }
 
 // Run executes the wave-1 extractors in parallel and assembles a Profile.
-func Run(text, source string, m Model) Profile {
-	ctx := NewJobContext(text, source, m)
+func Run(text, source string, meta Meta, m Model) Profile {
+	ctx := NewJobContext(text, source, meta, m)
 	exs := Wave1()
 
 	type res struct {

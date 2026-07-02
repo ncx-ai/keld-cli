@@ -58,14 +58,15 @@ type Profile struct {
 type JobContext struct {
 	Text   string
 	Source string
+	Meta   Meta
 	Model  Model
 
 	results map[string]map[string]any
 }
 
 // NewJobContext builds a context for one prompt.
-func NewJobContext(text, source string, m Model) *JobContext {
-	return &JobContext{Text: text, Source: source, Model: m, results: map[string]map[string]any{}}
+func NewJobContext(text, source string, meta Meta, m Model) *JobContext {
+	return &JobContext{Text: text, Source: source, Meta: meta, Model: m, results: map[string]map[string]any{}}
 }
 
 // Set is called by the pipeline after the parallel stage; do not call it from an extractor goroutine.

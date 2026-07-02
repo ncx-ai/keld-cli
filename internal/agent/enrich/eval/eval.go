@@ -118,7 +118,7 @@ func Score(gold []GoldRow, pred []Pred, fields []string) map[string]map[string]f
 func RunModel(m enrich.Model, gold []GoldRow) []Pred {
 	pred := make([]Pred, 0, len(gold))
 	for _, g := range gold {
-		p := enrich.Run(g.Text, "eval", m)
+		p := enrich.Run(g.Text, "eval", enrich.Meta{}, m)
 		pred = append(pred, Pred{
 			TaskType:    p.TaskType.Value,
 			Domain:      p.Domain.Value,

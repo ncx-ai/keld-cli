@@ -3,7 +3,7 @@ package enrich
 import "testing"
 
 func TestRunProducesEnrichedProfile(t *testing.T) {
-	p := Run("write a go function; email jane@acme.com", "claude_code", NewDeterministic())
+	p := Run("write a go function; email jane@acme.com", "claude_code", Meta{}, NewDeterministic())
 	if p.PipelineStatus != "enriched" {
 		t.Fatalf("status = %q, want enriched", p.PipelineStatus)
 	}
@@ -34,7 +34,7 @@ func TestRunIsolatesPanicAsPartial(t *testing.T) {
 	// task_type uses Classify (works via embedded Model); sensitivity+domain use
 	// Extract (panics). Pipeline must survive and mark partial.
 	m := panicModel{Model: NewDeterministic()}
-	p := Run("write a function", "claude_code", m)
+	p := Run("write a function", "claude_code", Meta{}, m)
 	if p.PipelineStatus != "partial" {
 		t.Fatalf("status = %q, want partial", p.PipelineStatus)
 	}

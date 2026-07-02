@@ -3,7 +3,7 @@ package enrich
 import "testing"
 
 func TestSensitivityHardEvidenceOverrides(t *testing.T) {
-	ctx := NewJobContext("my ssn is 123-45-6789", "claude_code", NewDeterministic())
+	ctx := NewJobContext("my ssn is 123-45-6789", "claude_code", Meta{}, NewDeterministic())
 	out, err := SensitivityExtractor{}.Run(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -15,7 +15,7 @@ func TestSensitivityHardEvidenceOverrides(t *testing.T) {
 }
 
 func TestSensitivitySpansAreMaskedNotRaw(t *testing.T) {
-	ctx := NewJobContext("key sk-live-ABCDEF0123456789 here", "claude_code", NewDeterministic())
+	ctx := NewJobContext("key sk-live-ABCDEF0123456789 here", "claude_code", Meta{}, NewDeterministic())
 	out, err := SensitivityExtractor{}.Run(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +35,7 @@ func TestSensitivitySpansAreMaskedNotRaw(t *testing.T) {
 }
 
 func TestTaskTypeExtractorTopLabel(t *testing.T) {
-	ctx := NewJobContext("write a function in go", "claude_code", NewDeterministic())
+	ctx := NewJobContext("write a function in go", "claude_code", Meta{}, NewDeterministic())
 	out, _ := TaskTypeExtractor{}.Run(ctx)
 	if out["task_type"].(Labeled).Value != "codegen" {
 		t.Fatalf("want codegen, got %+v", out["task_type"])
@@ -43,7 +43,7 @@ func TestTaskTypeExtractorTopLabel(t *testing.T) {
 }
 
 func TestDomainEntitiesExtractor(t *testing.T) {
-	ctx := NewJobContext("debug this python api bug", "claude_code", NewDeterministic())
+	ctx := NewJobContext("debug this python api bug", "claude_code", Meta{}, NewDeterministic())
 	out, _ := DomainEntitiesExtractor{}.Run(ctx)
 	if out["domain"].(Labeled).Value != "software" {
 		t.Fatalf("want software, got %+v", out["domain"])
