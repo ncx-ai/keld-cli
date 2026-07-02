@@ -3,8 +3,8 @@ package enrich
 import "testing"
 
 func TestSchemaVersion(t *testing.T) {
-	if SchemaVersion != 1 {
-		t.Fatalf("SchemaVersion = %d, want 1", SchemaVersion)
+	if SchemaVersion != 2 {
+		t.Fatalf("SchemaVersion = %d, want 2", SchemaVersion)
 	}
 }
 
@@ -33,5 +33,16 @@ func TestSensitivityRuleOrderPHIBeforePII(t *testing.T) {
 	}
 	if phiIdx == -1 || piiIdx == -1 || phiIdx > piiIdx {
 		t.Fatalf("expected phi rule before pii rule, got phi=%d pii=%d", phiIdx, piiIdx)
+	}
+}
+
+func TestSubcatsCoverFunctions(t *testing.T) {
+	for _, f := range Functions {
+		if len(Subcats[f.ID]) == 0 {
+			t.Errorf("function %q has no subcategories", f.ID)
+		}
+	}
+	if len(Functions) != 12 {
+		t.Fatalf("want 12 functions, got %d", len(Functions))
 	}
 }

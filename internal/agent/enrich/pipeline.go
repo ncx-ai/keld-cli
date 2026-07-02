@@ -20,8 +20,8 @@ func runStage(ex Extractor, ctx *JobContext) (out map[string]any, ok bool) {
 }
 
 // Run executes the wave-1 extractors in parallel and assembles a Profile.
-func Run(text, source string, m Model) Profile {
-	ctx := NewJobContext(text, source, m)
+func Run(text, source string, meta Meta, m Model) Profile {
+	ctx := NewJobContext(text, source, meta, m)
 	exs := Wave1()
 
 	type res struct {
@@ -50,6 +50,16 @@ func Run(text, source string, m Model) Profile {
 		ctx.Set(r.name, r.out)
 	}
 
+	// Wave2: extractors that depend on Wave1 output (run after commit).
+	wave2 := Wave2()
+	for _, ex := range wave2 {
+		if out, ok := runStage(ex, ctx); ok {
+			ctx.Set(ex.Name(), out)
+		} else {
+			anyFailed = true
+		}
+	}
+
 	status := "enriched"
 	if anyFailed {
 		status = "partial"
@@ -57,6 +67,9 @@ func Run(text, source string, m Model) Profile {
 
 	versions := map[string]string{}
 	for _, ex := range exs {
+		versions[ex.Name()] = ex.Version()
+	}
+	for _, ex := range wave2 {
 		versions[ex.Name()] = ex.Version()
 	}
 
@@ -67,6 +80,11 @@ func Run(text, source string, m Model) Profile {
 		Entities:          entitiesFrom(ctx.Get("domain_entities"), "entities"),
 		Sensitivity:       labeledFrom(ctx.Get("sensitivity"), "sensitivity", "sensitivity"),
 		SensitivitySpans:  entitiesFrom(ctx.Get("sensitivity"), "sensitivity_spans"),
+		Activity:          labeledFrom(ctx.Get("activity_type"), "activity_type", "activity_type"),
+		Personal:          labeledFrom(ctx.Get("personal"), "personal", "personal"),
+		FunctionGuess:     labeledFrom(ctx.Get("function_guess"), "function_guess", "function_guess"),
+		Subcategory:       labeledFrom(ctx.Get("subcategory"), "subcategory", "subcategory"),
+		SubcategoryAlt:    altsNamed(ctx.Get("subcategory"), "subcategory_alt"),
 		PipelineStatus:    status,
 		ExtractorVersions: versions,
 		SchemaVersion:     SchemaVersion,
@@ -84,8 +102,12 @@ func labeledFrom(out map[string]any, key, producer string) Labeled {
 }
 
 func altsFrom(out map[string]any) []Labeled {
+	return altsNamed(out, "task_type_alt")
+}
+
+func altsNamed(out map[string]any, key string) []Labeled {
 	if out != nil {
-		if a, ok := out["task_type_alt"].([]Labeled); ok {
+		if a, ok := out[key].([]Labeled); ok {
 			return a
 		}
 	}

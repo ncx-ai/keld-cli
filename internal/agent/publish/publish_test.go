@@ -14,7 +14,7 @@ import (
 )
 
 func TestBuildShapeAndNoRawText(t *testing.T) {
-	p := enrich.Run("key sk-live-ABCDEF0123456789 and write a function", "claude_code", enrich.NewDeterministic())
+	p := enrich.Run("key sk-live-ABCDEF0123456789 and write a function", "claude_code", enrich.Meta{}, enrich.NewDeterministic())
 	j := queue.Job{Source: "claude_code", Scheme: "prompt_id", ID: "X", SessionID: "S", Origin: "hook", Version: "2.1"}
 	e := Build(j, p, "dg@keld.co", false, time.Unix(0, 0).UTC())
 
@@ -76,5 +76,39 @@ func TestBuildKeepsEntityTextWhenEnabled(t *testing.T) {
 	b, _ := json.Marshal(Build(j, p, "a", true, time.Unix(0, 0).UTC()))
 	if !strings.Contains(string(b), "golang") {
 		t.Fatalf("entity text should be present when enabled: %s", b)
+	}
+}
+
+func TestBuildCarriesJobCategoryFields(t *testing.T) {
+	// The deterministic backend abstains on these facets (no keyword priors),
+	// so build a Profile literal with known values for all five job-category
+	// fields directly rather than relying on enrich.Run — this asserts the
+	// Build mapping specifically and deterministically, independent of the
+	// classification backend's behavior.
+	p := enrich.Profile{
+		Activity:      enrich.Labeled{Value: "generate", Confidence: 0.9},
+		Personal:      enrich.Labeled{Value: "work", Confidence: 0.9},
+		FunctionGuess: enrich.Labeled{Value: "eng", Confidence: 0.9},
+		Subcategory:   enrich.Labeled{Value: "eng.dev", Confidence: 0.9},
+		SubcategoryAlt: []enrich.Labeled{
+			{Value: "eng.test", Confidence: 0.4},
+		},
+	}
+	e := Build(queue.Job{Source: "claude_code"}, p, "a@b.test", false, time.Now())
+
+	if e.Activity != p.Activity {
+		t.Errorf("Activity = %+v, want %+v", e.Activity, p.Activity)
+	}
+	if e.Personal != p.Personal {
+		t.Errorf("Personal = %+v, want %+v", e.Personal, p.Personal)
+	}
+	if e.FunctionGuess != p.FunctionGuess {
+		t.Errorf("FunctionGuess = %+v, want %+v", e.FunctionGuess, p.FunctionGuess)
+	}
+	if e.Subcategory != p.Subcategory {
+		t.Errorf("Subcategory = %+v, want %+v", e.Subcategory, p.Subcategory)
+	}
+	if len(e.SubcategoryAlt) != 1 || e.SubcategoryAlt[0] != p.SubcategoryAlt[0] {
+		t.Errorf("SubcategoryAlt = %+v, want %+v", e.SubcategoryAlt, p.SubcategoryAlt)
 	}
 }

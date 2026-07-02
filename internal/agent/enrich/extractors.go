@@ -15,7 +15,19 @@ func versioned(name string) string { return fmt.Sprintf("%s-v%d", name, SchemaVe
 
 // Wave1 returns the independent first-wave extractors.
 func Wave1() []Extractor {
-	return []Extractor{TaskTypeExtractor{}, SensitivityExtractor{}, DomainEntitiesExtractor{}}
+	return []Extractor{
+		TaskTypeExtractor{}, SensitivityExtractor{}, DomainEntitiesExtractor{},
+		passExtractor{Pass{Name: "activity_type", Labels: Activities}},
+		passExtractor{Pass{Name: "personal", Labels: Personal}},
+		passExtractor{Pass{Name: "function_guess", Labels: Functions}},
+	}
+}
+
+// Wave2 runs after Wave1 and may read Wave1 results (e.g. conditioning).
+func Wave2() []Extractor {
+	return []Extractor{
+		condPassExtractor{Pass{Name: "subcategory", ConditionOn: "function_guess", LabelsByCond: Subcats}},
+	}
 }
 
 // --- task_type ---
