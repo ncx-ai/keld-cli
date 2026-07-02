@@ -16,25 +16,27 @@ var goldJSONL string
 
 // GoldRow is one labeled evaluation example.
 //
-// Activity and Subcategory are optional (schema-v2 facets, Tasks 4-5): older
-// rows leave them blank, and Score treats a blank gold value for a field as
-// "not scored" rather than counting it as a miss.
+// Activity, FunctionGuess, and Subcategory are optional (schema-v2 job-category
+// facets, Tasks 4-6): older rows leave them blank, and Score treats a blank
+// gold value for a field as "not scored" rather than counting it as a miss.
 type GoldRow struct {
-	Text        string `json:"text"`
-	TaskType    string `json:"task_type"`
-	Domain      string `json:"domain"`
-	Sensitivity string `json:"sensitivity"`
-	Activity    string `json:"activity_type"`
-	Subcategory string `json:"subcategory"`
+	Text          string `json:"text"`
+	TaskType      string `json:"task_type"`
+	Domain        string `json:"domain"`
+	Sensitivity   string `json:"sensitivity"`
+	Activity      string `json:"activity_type"`
+	FunctionGuess string `json:"function_guess"`
+	Subcategory   string `json:"subcategory"`
 }
 
 // Pred is one model prediction for the scored fields.
 type Pred struct {
-	TaskType    string
-	Domain      string
-	Sensitivity string
-	Activity    string
-	Subcategory string
+	TaskType      string
+	Domain        string
+	Sensitivity   string
+	Activity      string
+	FunctionGuess string
+	Subcategory   string
 }
 
 // LoadGold parses the embedded gold set.
@@ -68,6 +70,8 @@ func fieldOf(x any, f string) string {
 			return v.Sensitivity
 		case "activity_type":
 			return v.Activity
+		case "function_guess":
+			return v.FunctionGuess
 		case "subcategory":
 			return v.Subcategory
 		}
@@ -81,6 +85,8 @@ func fieldOf(x any, f string) string {
 			return v.Sensitivity
 		case "activity_type":
 			return v.Activity
+		case "function_guess":
+			return v.FunctionGuess
 		case "subcategory":
 			return v.Subcategory
 		}
@@ -148,11 +154,12 @@ func RunModel(m enrich.Model, gold []GoldRow) []Pred {
 	for _, g := range gold {
 		p := enrich.Run(g.Text, "eval", enrich.Meta{}, m)
 		pred = append(pred, Pred{
-			TaskType:    p.TaskType.Value,
-			Domain:      p.Domain.Value,
-			Sensitivity: p.Sensitivity.Value,
-			Activity:    p.Activity.Value,
-			Subcategory: p.Subcategory.Value,
+			TaskType:      p.TaskType.Value,
+			Domain:        p.Domain.Value,
+			Sensitivity:   p.Sensitivity.Value,
+			Activity:      p.Activity.Value,
+			FunctionGuess: p.FunctionGuess.Value,
+			Subcategory:   p.Subcategory.Value,
 		})
 	}
 	return pred

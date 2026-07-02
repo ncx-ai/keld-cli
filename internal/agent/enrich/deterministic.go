@@ -104,6 +104,14 @@ func (d *deterministic) Classify(text string, tasks map[string][]string) map[str
 	out := map[string][]Ranked{}
 	for task, allowed := range tasks {
 		kw := d.keywords[task]
+		if kw == nil {
+			// No keyword priors for this task (e.g. the newer job-category
+			// facets): abstain rather than guessing via fallbackLabel, so
+			// callers can gate on an empty label instead of treating a
+			// meaningless last-resort pick as a real classification.
+			out[task] = []Ranked{{Label: "", Confidence: 0}}
+			continue
+		}
 		var best string
 		bestN := 0
 		for _, label := range allowed {

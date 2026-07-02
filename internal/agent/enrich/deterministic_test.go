@@ -68,6 +68,21 @@ func TestPhoneMatchesRealNumber(t *testing.T) {
 	}
 }
 
+func TestDeterministicAbstainsOnUnknownTask(t *testing.T) {
+	m := NewDeterministic()
+	res := m.Classify("write a function", map[string][]string{"personal": {"a work task", "personal activity"}})
+	ranked := res["personal"]
+	if len(ranked) != 1 || ranked[0].Label != "" || ranked[0].Confidence != 0 {
+		t.Fatalf("expected a single abstaining Ranked{Label:\"\", Confidence:0} for a task with no keyword priors, got %+v", ranked)
+	}
+
+	// A known task (has a keyword table) must still classify normally.
+	res = m.Classify("write a function", map[string][]string{"task_type": TaskTypes})
+	if got := res["task_type"]; len(got) == 0 || got[0].Label == "" {
+		t.Fatalf("expected task_type to still classify (known task), got %+v", got)
+	}
+}
+
 func TestPhoneIgnoresStreetAddress(t *testing.T) {
 	m := NewDeterministic()
 	text := "123 Main St Apt 4"

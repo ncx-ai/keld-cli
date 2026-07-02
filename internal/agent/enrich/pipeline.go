@@ -51,7 +51,8 @@ func Run(text, source string, meta Meta, m Model) Profile {
 	}
 
 	// Wave2: extractors that depend on Wave1 output (run after commit).
-	for _, ex := range Wave2() {
+	wave2 := Wave2()
+	for _, ex := range wave2 {
 		if out, ok := runStage(ex, ctx); ok {
 			ctx.Set(ex.Name(), out)
 		} else {
@@ -68,7 +69,7 @@ func Run(text, source string, meta Meta, m Model) Profile {
 	for _, ex := range exs {
 		versions[ex.Name()] = ex.Version()
 	}
-	for _, ex := range Wave2() {
+	for _, ex := range wave2 {
 		versions[ex.Name()] = ex.Version()
 	}
 

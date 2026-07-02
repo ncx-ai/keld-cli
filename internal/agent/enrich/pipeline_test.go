@@ -25,35 +25,35 @@ func TestRunProducesEnrichedProfile(t *testing.T) {
 }
 
 func TestProfileHasActivityAndFunctionGuess(t *testing.T) {
+	// The deterministic backend has no keyword priors for these job-category
+	// facets, so it must abstain (empty value, zero confidence) rather than
+	// emit a meaningless fallback label. Atlas gates on this emptiness; see
+	// TestCondPassExtractorSwitchesLabelSetByFunction and
+	// TestClassifyPassMapsReadableToID for real-label wiring via stub models.
 	p := Run("write a python function to sort a list", "eval", Meta{}, NewDeterministic())
-	if p.Activity.Value == "" {
-		t.Error("expected an activity_type")
+	if p.Activity.Value != "" || p.Activity.Confidence != 0 {
+		t.Errorf("expected activity_type to abstain, got %+v", p.Activity)
 	}
-	if p.FunctionGuess.Value == "" {
-		t.Error("expected a function_guess")
+	if p.FunctionGuess.Value != "" || p.FunctionGuess.Confidence != 0 {
+		t.Errorf("expected function_guess to abstain, got %+v", p.FunctionGuess)
 	}
-	if p.Personal.Value == "" {
-		t.Error("expected a personal label")
+	if p.Personal.Value != "" || p.Personal.Confidence != 0 {
+		t.Errorf("expected personal to abstain, got %+v", p.Personal)
 	}
 }
 
 func TestSubcategoryConditionsOnFunctionGuess(t *testing.T) {
-	// Deterministic backend falls back to "gen" when no function-specific rule matches.
-	// This test verifies that the returned subcategory id belongs to the guessed function.
+	// The deterministic backend abstains on function_guess (no keyword priors),
+	// so subcategory's conditioning on it must cascade the abstention rather
+	// than pick an arbitrary label set. Real conditioning behavior (subcategory
+	// id belonging to the guessed function) is covered by
+	// TestCondPassExtractorSwitchesLabelSetByFunction via a stub model.
 	p := Run("debug why this handler throws a 500 error", "eval", Meta{}, NewDeterministic())
-	if p.FunctionGuess.Value == "" {
-		t.Fatal("no function guess")
+	if p.FunctionGuess.Value != "" {
+		t.Fatalf("expected function_guess to abstain, got %+v", p.FunctionGuess)
 	}
-	// subcategory id must belong to the guessed function
-	subs := Subcats[p.FunctionGuess.Value]
-	ok := false
-	for _, s := range subs {
-		if s.ID == p.Subcategory.Value {
-			ok = true
-		}
-	}
-	if !ok {
-		t.Fatalf("subcategory %q not under function %q", p.Subcategory.Value, p.FunctionGuess.Value)
+	if p.Subcategory.Value != "" || p.Subcategory.Confidence != 0 {
+		t.Fatalf("expected subcategory to abstain when function_guess abstains, got %+v", p.Subcategory)
 	}
 }
 
