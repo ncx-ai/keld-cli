@@ -16,8 +16,8 @@ func TestRunProducesEnrichedProfile(t *testing.T) {
 	if p.SchemaVersion != SchemaVersion {
 		t.Fatalf("schema version not set")
 	}
-	if len(p.ExtractorVersions) != 6 {
-		t.Fatalf("want 6 extractor versions, got %d", len(p.ExtractorVersions))
+	if len(p.ExtractorVersions) != 7 {
+		t.Fatalf("want 7 extractor versions, got %d", len(p.ExtractorVersions))
 	}
 	if p.EnrichedAt.IsZero() {
 		t.Fatal("EnrichedAt must be set")
@@ -38,7 +38,8 @@ func TestProfileHasActivityAndFunctionGuess(t *testing.T) {
 }
 
 func TestSubcategoryConditionsOnFunctionGuess(t *testing.T) {
-	// deterministic backend keys on "debug" -> eng.debug once function=eng.
+	// Deterministic backend falls back to "gen" when no function-specific rule matches.
+	// This test verifies that the returned subcategory id belongs to the guessed function.
 	p := Run("debug why this handler throws a 500 error", "eval", Meta{}, NewDeterministic())
 	if p.FunctionGuess.Value == "" {
 		t.Fatal("no function guess")

@@ -68,6 +68,9 @@ func Run(text, source string, meta Meta, m Model) Profile {
 	for _, ex := range exs {
 		versions[ex.Name()] = ex.Version()
 	}
+	for _, ex := range Wave2() {
+		versions[ex.Name()] = ex.Version()
+	}
 
 	return Profile{
 		TaskType:          labeledFrom(ctx.Get("task_type"), "task_type", "task_type"),
@@ -98,12 +101,7 @@ func labeledFrom(out map[string]any, key, producer string) Labeled {
 }
 
 func altsFrom(out map[string]any) []Labeled {
-	if out != nil {
-		if a, ok := out["task_type_alt"].([]Labeled); ok {
-			return a
-		}
-	}
-	return nil
+	return altsNamed(out, "task_type_alt")
 }
 
 func altsNamed(out map[string]any, key string) []Labeled {
