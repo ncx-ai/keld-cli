@@ -349,55 +349,297 @@ func TestSettingsEndpoint(t *testing.T) {
 
 **Repo:** keld-atlas. **Coordinate** (branch off atlas `main`; new files only). Tests run in Docker (never host Python 3.14).
 
-**Files:** Modify `services/api/app/models.py`; Create `services/api/alembic/versions/0027_org_enrichment_settings.py`; Test `services/api/tests/test_agent_settings.py`.
+**Files:** Modify `services/api/app/models.py`; Create `services/api/alembic/versions/0028_org_enrichment_settings.py`; Test `services/api/tests/test_enrichment_settings.py`.
 
-- [ ] **Step 1: Add the model** (`models.py`), mirroring existing org-scoped tables:
+All imports below (`UUID`, `Boolean`, `ForeignKey`, `DateTime`, `false`, `func`, `Mapped`, `mapped_column`, `from app.database import Base`) already exist at the top of `models.py` — do NOT re-add them.
+
+- [ ] **Step 1: Add the model** at the end of `services/api/app/models.py` (one settings row per org; `org_id` is the PK):
 ```python
 class OrgEnrichmentSettings(Base):
     __tablename__ = "org_enrichment_settings"
-    org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True)
-    include_entity_text: Mapped[bool] = mapped_column(default=False, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    include_entity_text: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=false()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 ```
-(Match the exact `Mapped`/`mapped_column` import + column style already used in models.py.)
 
-- [ ] **Step 2: Alembic migration** `0027_org_enrichment_settings.py` — `down_revision = "0026_fix_anthropic_cost_cents"` (verify current head with `alembic heads` first); `create_table("org_enrichment_settings", ...)` with the columns above; `downgrade` drops it.
+- [ ] **Step 2: Create the migration** `services/api/alembic/versions/0028_org_enrichment_settings.py` (chains off the current head `0027_org_onboarding`):
+```python
+"""org_enrichment_settings
 
-- [ ] **Step 3: Test** (`test_agent_settings.py`) — apply migration + a round-trip: insert a row for an org, read it back; default `include_entity_text` is false when unset.
-  Run: `docker compose exec -T -e KELD_TEST_DATABASE_URL=... -e KELD_TEST_REDIS_URL=... api sh -lc 'cd /app && alembic upgrade head && python -m pytest tests/test_agent_settings.py -q'`
+Revision ID: 0028_org_enrichment_settings
+Revises: 0027_org_onboarding
+"""
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
-- [ ] **Step 4: Commit** — `git commit -m "feat(enrichment-settings): org_enrichment_settings model + migration"`
+revision = "0028_org_enrichment_settings"
+down_revision = "0027_org_onboarding"
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.create_table(
+        "org_enrichment_settings",
+        sa.Column("org_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("include_entity_text", sa.Boolean(), server_default=sa.false(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.ForeignKeyConstraint(["org_id"], ["organizations.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("org_id"),
+    )
+
+
+def downgrade() -> None:
+    op.drop_table("org_enrichment_settings")
+```
+
+- [ ] **Step 3: Verify the migration chain is a single linear head** (reads files only, no DB mutation):
+```bash
+docker compose run --rm --no-deps --entrypoint sh api -c "pip install -e . -q && alembic heads && alembic history | head -3"
+```
+Expected: `alembic heads` prints exactly one head — `0028_org_enrichment_settings (head)`; history shows `0028_org_enrichment_settings -> 0027_org_onboarding`.
+
+- [ ] **Step 4: Write + run the model round-trip test** `services/api/tests/test_enrichment_settings.py` (the `engine` fixture builds tables from `Base.metadata`, so no alembic step needed in the test):
+```python
+import uuid
+import pytest
+from sqlalchemy import select
+
+from app.models import Organization, OrgEnrichmentSettings
+
+
+@pytest.mark.asyncio
+async def test_default_false_when_column_unset(session):
+    org = Organization(name="Acme", slug=f"acme-{uuid.uuid4().hex[:8]}")
+    session.add(org)
+    await session.flush()
+    session.add(OrgEnrichmentSettings(org_id=org.id))  # include_entity_text omitted
+    await session.commit()
+    row = await session.scalar(select(OrgEnrichmentSettings).where(OrgEnrichmentSettings.org_id == org.id))
+    assert row.include_entity_text is False
+
+
+@pytest.mark.asyncio
+async def test_roundtrip_true(session):
+    org = Organization(name="Beta", slug=f"beta-{uuid.uuid4().hex[:8]}")
+    session.add(org)
+    await session.flush()
+    session.add(OrgEnrichmentSettings(org_id=org.id, include_entity_text=True))
+    await session.commit()
+    row = await session.scalar(select(OrgEnrichmentSettings).where(OrgEnrichmentSettings.org_id == org.id))
+    assert row.include_entity_text is True
+```
+Run:
+```bash
+docker compose run --rm --no-deps -e KELD_TEST_DATABASE_URL=postgresql+asyncpg://keld:keld@postgres:5432/keld_test --entrypoint sh api -c "pip install -e .[test] -q && pytest -q tests/test_enrichment_settings.py"
+```
+Expected: 2 passed.
+
+- [ ] **Step 5: Commit** (only the API files — do NOT stage anything under `services/web`):
+```bash
+git add services/api/app/models.py services/api/alembic/versions/0028_org_enrichment_settings.py services/api/tests/test_enrichment_settings.py
+git commit -m "feat(enrichment-settings): org_enrichment_settings model + migration"
+```
 
 ---
 
-### Task 5: keld-atlas — GET /v1/enrichment-settings + admin set API (ATLAS; docker)
+### Task 5: keld-atlas — GET /v1/enrichment-settings + admin read/set API (ATLAS; docker)
 
-**Files:** Create `services/api/app/routers/agent_settings.py`; register it in the app; Test `services/api/tests/test_agent_settings_api.py`.
+**Files:** Create `services/api/app/routers/enrichment_settings.py`; register in `services/api/app/main.py`; Test `services/api/tests/test_enrichment_settings_api.py`.
 
 **Interfaces:**
-- `GET /v1/enrichment-settings` — daemon-authed via the existing ingest-token resolver (mirror `routers/enrichments.py` / `otel.py`): resolve token→org, return `{"include_entity_text": <bool>}` (the org's row, or `false` default when no row). Org-scoped.
-- Admin: `GET /api/org-settings` + `PATCH /api/org-settings` (`Depends(require_admin)`, `current_org`) to read/set `include_entity_text` (upsert the row).
+- Consumes: `OrgEnrichmentSettings` (Task 4); `require_org(request, db) -> uuid.UUID` from `app.ingest_common` (imperative, `await`ed — NOT a `Depends`); `require_admin` + `current_org` from `app.auth`; `get_db` from `app.database`.
+- Produces: `GET /v1/enrichment-settings` (daemon, ingest-token auth) → `{"include_entity_text": <bool>}` (org's row, or default `false` when no row); `GET /api/enrichment-settings` + `PATCH /api/enrichment-settings` (admin: session cookie + admin role) to read/set.
 
-- [ ] **Step 1: Write the failing tests** — (a) daemon GET with a valid ingest token returns the org's value (and default false when unset); (b) daemon GET with a bad/missing token → 401/403; (c) admin PATCH sets the value and the daemon GET reflects it; (d) cross-org isolation (org A's token never sees org B's value). Use the repo's existing token/admin fixtures.
+- [ ] **Step 1: Write the failing tests** `services/api/tests/test_enrichment_settings_api.py`:
+```python
+import uuid
+import pytest
 
-- [ ] **Step 2: Run to verify fail** — the pytest above → FAIL (router missing).
+from app.models import Organization, OrgEnrichmentSettings
+from app.ingest_tokens import ensure_ingest_token
 
-- [ ] **Step 3: Implement** the router mirroring `enrichments.py` for the token→org dependency and `require_admin`/`current_org` for the admin endpoints; upsert on PATCH (`on_conflict_do_update` by `org_id`, like other upserts in the repo). Register the router in the FastAPI app.
 
-- [ ] **Step 4: Run to verify pass** — `docker compose exec -T ... api sh -lc 'cd /app && python -m pytest tests/test_agent_settings_api.py -q'` → PASS; run the broader router suite to check no regression.
+async def _mk_org(session, name):
+    org = Organization(name=name, slug=f"{name}-{uuid.uuid4().hex[:8]}")
+    session.add(org)
+    await session.flush()
+    return org
 
-- [ ] **Step 5: Commit** — `git commit -m "feat(enrichment-settings): GET /v1/enrichment-settings + admin read/set API"`
+
+@pytest.mark.asyncio
+async def test_daemon_get_defaults_false_when_unset(client, session):
+    org = await _mk_org(session, "acme")
+    token = await ensure_ingest_token(session, org.id)
+    await session.commit()
+    res = await client.get("/v1/enrichment-settings", headers={"x-keld-ingest-token": token})
+    assert res.status_code == 200
+    assert res.json() == {"include_entity_text": False}
+
+
+@pytest.mark.asyncio
+async def test_daemon_get_reflects_row(client, session):
+    org = await _mk_org(session, "acme")
+    token = await ensure_ingest_token(session, org.id)
+    session.add(OrgEnrichmentSettings(org_id=org.id, include_entity_text=True))
+    await session.commit()
+    res = await client.get("/v1/enrichment-settings", headers={"x-keld-ingest-token": token})
+    assert res.status_code == 200
+    assert res.json() == {"include_entity_text": True}
+
+
+@pytest.mark.asyncio
+async def test_daemon_get_bad_or_missing_token_401(client, session):
+    bad = await client.get("/v1/enrichment-settings", headers={"x-keld-ingest-token": "nope"})
+    assert bad.status_code == 401
+    missing = await client.get("/v1/enrichment-settings")
+    assert missing.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_admin_patch_then_daemon_get(client, session, org_ctx):
+    token = await ensure_ingest_token(session, org_ctx.id)
+    await session.commit()
+    r = await client.patch("/api/enrichment-settings", json={"include_entity_text": True})
+    assert r.status_code == 200
+    assert r.json()["include_entity_text"] is True
+    g = await client.get("/v1/enrichment-settings", headers={"x-keld-ingest-token": token})
+    assert g.json() == {"include_entity_text": True}
+    # upsert UPDATE path: flip back off
+    r2 = await client.patch("/api/enrichment-settings", json={"include_entity_text": False})
+    assert r2.json()["include_entity_text"] is False
+
+
+@pytest.mark.asyncio
+async def test_cross_org_isolation(client, session):
+    a = await _mk_org(session, "a")
+    b = await _mk_org(session, "b")
+    ta = await ensure_ingest_token(session, a.id)
+    tb = await ensure_ingest_token(session, b.id)
+    session.add(OrgEnrichmentSettings(org_id=a.id, include_entity_text=True))
+    await session.commit()
+    ga = await client.get("/v1/enrichment-settings", headers={"x-keld-ingest-token": ta})
+    gb = await client.get("/v1/enrichment-settings", headers={"x-keld-ingest-token": tb})
+    assert ga.json()["include_entity_text"] is True
+    assert gb.json()["include_entity_text"] is False
+```
+
+- [ ] **Step 2: Run to verify fail** —
+```bash
+docker compose run --rm --no-deps -e KELD_TEST_DATABASE_URL=postgresql+asyncpg://keld:keld@postgres:5432/keld_test --entrypoint sh api -c "pip install -e .[test] -q && pytest -q tests/test_enrichment_settings_api.py"
+```
+Expected: FAIL (404s — router not registered).
+
+- [ ] **Step 3: Implement** `services/api/app/routers/enrichment_settings.py`:
+```python
+import uuid
+
+from fastapi import APIRouter, Depends, Request
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth import current_org, require_admin
+from app.database import get_db
+from app.ingest_common import require_org
+from app.models import OrgEnrichmentSettings
+
+# Daemon-facing: ingest-token auth, mirrors enrichments/otel (/v1 prefix).
+router = APIRouter(prefix="/v1", tags=["enrichment-settings"])
+# Admin-facing: session cookie + admin role. Full paths (no prefix) to avoid
+# empty-path/trailing-slash redirect ambiguity.
+admin_router = APIRouter(tags=["enrichment-settings"], dependencies=[Depends(require_admin)])
+
+
+async def _org_settings(db: AsyncSession, org_id: uuid.UUID) -> dict:
+    row = await db.scalar(
+        select(OrgEnrichmentSettings).where(OrgEnrichmentSettings.org_id == org_id)
+    )
+    if row is None:
+        return {"include_entity_text": False}
+    return {"include_entity_text": row.include_entity_text}
+
+
+@router.get("/enrichment-settings")
+async def get_enrichment_settings(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
+    org_id = await require_org(request, db)
+    return await _org_settings(db, org_id)
+
+
+@admin_router.get("/api/enrichment-settings")
+async def admin_get_settings(
+    org: uuid.UUID = Depends(current_org), db: AsyncSession = Depends(get_db)
+) -> dict:
+    return await _org_settings(db, org)
+
+
+class SettingsPatch(BaseModel):
+    include_entity_text: bool
+
+
+@admin_router.patch("/api/enrichment-settings")
+async def admin_set_settings(
+    body: SettingsPatch,
+    org: uuid.UUID = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    stmt = (
+        pg_insert(OrgEnrichmentSettings)
+        .values(org_id=org, include_entity_text=body.include_entity_text)
+        .on_conflict_do_update(
+            index_elements=["org_id"],
+            set_={"include_entity_text": body.include_entity_text},
+        )
+    )
+    await db.execute(stmt)
+    await db.commit()
+    return await _org_settings(db, org)
+```
+Register both routers in `services/api/app/main.py` `create_app()` (add the import with the other router imports, and the two `include_router` lines beside the existing `app.include_router(enrichments.router)`):
+```python
+from app.routers import enrichment_settings
+...
+app.include_router(enrichment_settings.router)
+app.include_router(enrichment_settings.admin_router)
+```
+(Match the existing import style in main.py — if routers are imported as `from app.routers import enrichments`, follow that; if `import enrichments`, follow that.)
+
+- [ ] **Step 4: Run to verify pass** —
+```bash
+docker compose run --rm --no-deps -e KELD_TEST_DATABASE_URL=postgresql+asyncpg://keld:keld@postgres:5432/keld_test --entrypoint sh api -c "pip install -e .[test] -q && pytest -q tests/test_enrichment_settings_api.py"
+```
+Expected: 5 passed. Then run the full API suite once to confirm no regression:
+```bash
+docker compose run --rm --no-deps -e KELD_TEST_DATABASE_URL=postgresql+asyncpg://keld:keld@postgres:5432/keld_test --entrypoint sh api -c "pip install -e .[test] -q && pytest -q"
+```
+
+- [ ] **Step 5: Commit** (API files only):
+```bash
+git add services/api/app/routers/enrichment_settings.py services/api/app/main.py services/api/tests/test_enrichment_settings_api.py
+git commit -m "feat(enrichment-settings): GET /v1/enrichment-settings + admin read/set API"
+```
 
 ---
 
-### Task 6: keld-atlas — minimal admin Settings-page toggle (ATLAS web; coordinate)
+### Task 6: keld-atlas — minimal admin Settings-page toggle (ATLAS web; DEFERRED — coordinate)
 
-**Files:** `services/web/…` admin Settings page (additive) + a hook for the org-settings API; Test with Vitest.
+**Status: held.** The other session is actively editing the `services/web` tree (uncommitted `components/sidebar.tsx`). The functional capability ships with Task 5's admin API; the toggle UI is additive polish. Do this once the web tree is quiet (or the other session's work is merged), on a fresh branch off the then-current atlas `main`.
 
-**Coordinate:** the other session touches the web tree — make this **additive** (a single toggle + a small hook), avoid their files, and rebase/branch off atlas `main`.
+**Files (when resumed):** `services/web/…` admin Settings page (additive) + a hook for the `/api/enrichment-settings` API; Test with Vitest.
 
-- [ ] **Step 1: Add a `useOrgSettings` hook** (React Query) — GET/PATCH `/api/org-settings`, mirroring an existing admin hook's shape.
-- [ ] **Step 2: Add a single "Include entity text (send domain-entity surface text to Atlas)" toggle** to the existing admin Settings page, wired to the hook. Keep copy minimal + accurate (default off; sensitivity spans always masked regardless).
+- [ ] **Step 1: Add a `useEnrichmentSettings` hook** (React Query) — GET/PATCH `/api/enrichment-settings`, mirroring an existing admin hook's shape.
+- [ ] **Step 2: Add a single "Include entity text" toggle** to the existing admin Settings page, wired to the hook. Copy: "Include entity text — send domain-entity surface text to Atlas (default off; sensitive spans are always masked regardless)."
 - [ ] **Step 3: Vitest** — the toggle reads the current value and PATCHes on change (mock the hook/endpoint). Run `cd services/web && pnpm exec vitest run` (full suite green).
 - [ ] **Step 4: Commit** — `git commit -m "feat(web): admin toggle for org include_entity_text"`
 
