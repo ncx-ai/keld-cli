@@ -4,7 +4,7 @@ package enrich
 
 // SchemaVersion gates the label vocabulary below. Changing any vocab list is a
 // contract-affecting event: bump this and re-run the eval set.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // TaskTypes is the canonical job-classification vocabulary (ported from
 // inference-enrichment).
@@ -55,4 +55,122 @@ var SensitivityFromEntity = []SensRule{
 	{"pci", []string{"credit_card"}},
 	{"secrets", []string{"api_key", "secret"}},
 	{"pii", []string{"email", "phone", "person", "address"}},
+}
+
+// Activities — the activity_type facet (what cognitive operation).
+var Activities = []LabelDef{
+	{"generate", "generating new content from scratch: draft, write, code, ideate"},
+	{"transform", "transforming existing content: rewrite, summarize, translate, reformat"},
+	{"analyze", "analyzing and reasoning over inputs: compute, evaluate, decide"},
+	{"retrieve", "gathering and researching information, looking things up"},
+	{"converse", "interactive question answering or brainstorming"},
+	{"review", "reviewing, critiquing, or checking existing work for errors"},
+}
+
+// Personal — binary work-vs-personal.
+var Personal = []LabelDef{
+	{"work", "a work-related professional task"},
+	{"personal", "personal, entertainment, roleplay, or non-work activity"},
+}
+
+// Functions — the 12 business functions (ids match docs/job-categories.md).
+var Functions = []LabelDef{
+	{"eng", "software engineering: writing, debugging, testing, deploying software"},
+	{"prod", "product management and design: requirements, specs, UX/UI"},
+	{"data", "data analytics: analysis, modeling, dashboards, quantitative insight"},
+	{"mkt", "marketing and content: copy, campaigns, brand, SEO, market research"},
+	{"sales", "sales and revenue: prospecting, outreach, proposals, deal support"},
+	{"support", "customer support: helping existing customers, troubleshooting, tickets"},
+	{"delivery", "service delivery and operations: client/production work"},
+	{"fin", "finance and accounting: bookkeeping, analysis, forecasting, billing"},
+	{"legal", "legal, risk and compliance: contracts, regulation, risk"},
+	{"hr", "people and HR: recruiting, hiring content, onboarding, performance"},
+	{"it", "IT and security: internal helpdesk, security, sysadmin, scripting"},
+	{"gen", "strategy, admin and general office work not tied to one function"},
+}
+
+// Subcats — subcategory LabelDefs keyed by function id.
+var Subcats = map[string][]LabelDef{
+	"eng": {
+		{"eng.dev", "writing new feature or product code"},
+		{"eng.debug", "debugging and troubleshooting existing code"},
+		{"eng.test", "writing tests or doing QA"},
+		{"eng.review", "reviewing or refactoring code"},
+		{"eng.devops", "CI/CD, infrastructure, deployment"},
+		{"eng.docs", "writing technical documentation"},
+	},
+	"prod": {
+		{"prod.discovery", "product discovery and requirements"},
+		{"prod.spec", "writing specs, PRDs, roadmaps"},
+		{"prod.design", "UX or UI design"},
+		{"prod.research", "user research"},
+	},
+	"data": {
+		{"data.prep", "cleaning and preparing data"},
+		{"data.analysis", "statistical analysis and modeling"},
+		{"data.report", "reports and dashboards"},
+		{"data.insight", "insights and recommendations"},
+	},
+	"mkt": {
+		{"mkt.content", "content and copywriting"},
+		{"mkt.campaign", "campaigns and channels"},
+		{"mkt.seo", "SEO and web"},
+		{"mkt.creative", "creative and brand"},
+		{"mkt.research", "market and competitive research"},
+	},
+	"sales": {
+		{"sales.prospect", "prospecting and lead research"},
+		{"sales.outreach", "sales outreach and messaging"},
+		{"sales.proposal", "proposals, RFPs, quotes"},
+		{"sales.enable", "deal support, enablement, ROI justification"},
+		{"sales.crm", "pipeline and CRM admin"},
+	},
+	"support": {
+		{"support.chat", "conversational customer support"},
+		{"support.tech", "technical troubleshooting for a customer"},
+		{"support.triage", "ticket triage and routing"},
+		{"support.kb", "help content and knowledge base"},
+		{"support.success", "account and success management"},
+	},
+	"delivery": {
+		{"delivery.client", "client or project delivery"},
+		{"delivery.process", "process design and documentation"},
+		{"delivery.supply", "supply chain and procurement"},
+		{"delivery.quality", "quality and assurance"},
+		{"delivery.domain", "domain-specific production"},
+	},
+	"fin": {
+		{"fin.books", "bookkeeping and reconciliation"},
+		{"fin.analysis", "financial analysis and modeling"},
+		{"fin.close", "financial reporting and close"},
+		{"fin.fpa", "FP&A, budgeting and forecasting"},
+		{"fin.billing", "billing, AR, AP"},
+	},
+	"legal": {
+		{"legal.contract", "contract drafting and review"},
+		{"legal.research", "legal and regulatory research"},
+		{"legal.compliance", "compliance and policy"},
+		{"legal.risk", "risk assessment"},
+	},
+	"hr": {
+		{"hr.recruit", "recruiting and sourcing candidates"},
+		{"hr.content", "hiring content like job descriptions"},
+		{"hr.onboard", "onboarding and training"},
+		{"hr.support", "HR support and policy"},
+		{"hr.perf", "performance and compensation"},
+	},
+	"it": {
+		{"it.helpdesk", "internal IT support and helpdesk"},
+		{"it.security", "security and threat analysis"},
+		{"it.sysadmin", "systems administration"},
+		{"it.automation", "automation and scripting"},
+	},
+	"gen": {
+		{"gen.strategy", "business strategy and planning"},
+		{"gen.pm", "program and project management"},
+		{"gen.comms", "communications and email"},
+		{"gen.notes", "meeting notes and summaries"},
+		{"gen.translate", "translation and localization"},
+		{"gen.uncat", "general or uncategorized work with no clear function"},
+	},
 }
