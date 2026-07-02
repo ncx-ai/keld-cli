@@ -632,16 +632,161 @@ git commit -m "feat(enrichment-settings): GET /v1/enrichment-settings + admin re
 
 ---
 
-### Task 6: keld-atlas — minimal admin Settings-page toggle (ATLAS web; DEFERRED — coordinate)
+### Task 6: keld-atlas — admin Settings-page toggle (ATLAS web; Vitest)
 
-**Status: held.** The other session is actively editing the `services/web` tree (uncommitted `components/sidebar.tsx`). The functional capability ships with Task 5's admin API; the toggle UI is additive polish. Do this once the web tree is quiet (or the other session's work is merged), on a fresh branch off the then-current atlas `main`.
+**Files:** Create `services/web/hooks/use-enrichment-settings.ts`; Create `services/web/hooks/use-enrichment-settings.test.tsx`; Create `services/web/components/settings/enrichment-settings-section.tsx`; Modify `services/web/app/(app)/admin/settings/page.tsx` (currently a `ComingSoon` stub).
 
-**Files (when resumed):** `services/web/…` admin Settings page (additive) + a hook for the `/api/enrichment-settings` API; Test with Vitest.
+**Stack facts (verified):** `/api/*` proxies to the FastAPI backend via `next.config.ts` rewrites, so the hook's GET/PATCH `/api/enrichment-settings` reach Task 5's admin router (cookies auto-sent same-origin). The HTTP helper is `fetchKeldApi` in `@/lib/api` (base `/api`; auto-adds `Content-Type: application/json` for string bodies; parses JSON / handles 204; throws on non-2xx). Toggles use heroui `Switch` (`isSelected`, `isDisabled`, `onChange(selected: boolean)`, `size`, `aria-label`, with `Switch.Control > Switch.Thumb`). React Query is `@tanstack/react-query`. Tests mock `@/lib/api` (module-level `vi.mock`), render hooks with a fresh `QueryClient` wrapper.
 
-- [ ] **Step 1: Add a `useEnrichmentSettings` hook** (React Query) — GET/PATCH `/api/enrichment-settings`, mirroring an existing admin hook's shape.
-- [ ] **Step 2: Add a single "Include entity text" toggle** to the existing admin Settings page, wired to the hook. Copy: "Include entity text — send domain-entity surface text to Atlas (default off; sensitive spans are always masked regardless)."
-- [ ] **Step 3: Vitest** — the toggle reads the current value and PATCHes on change (mock the hook/endpoint). Run `cd services/web && pnpm exec vitest run` (full suite green).
-- [ ] **Step 4: Commit** — `git commit -m "feat(web): admin toggle for org include_entity_text"`
+**Interfaces:**
+- Produces: `useEnrichmentSettings()` → `{ includeEntityText: boolean; isSaving: boolean; setIncludeEntityText: (v: boolean) => void }`; `<EnrichmentSettingsSection/>` client component.
+
+- [ ] **Step 1: Write the failing hook test** `services/web/hooks/use-enrichment-settings.test.tsx` (mirrors `use-preference.test.tsx`):
+```tsx
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { renderHook, waitFor, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useEnrichmentSettings } from "./use-enrichment-settings";
+
+const fetchMock = vi.fn();
+vi.mock("@/lib/api", () => ({ fetchKeldApi: (...a: unknown[]) => fetchMock(...a) }));
+
+function wrapper({ children }: { children: React.ReactNode }) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+}
+
+beforeEach(() => fetchMock.mockReset());
+
+describe("useEnrichmentSettings", () => {
+  it("reads include_entity_text (false before load, then the fetched value)", async () => {
+    fetchMock.mockResolvedValueOnce({ include_entity_text: true });
+    const { result } = renderHook(() => useEnrichmentSettings(), { wrapper });
+    expect(result.current.includeEntityText).toBe(false); // fallback before load
+    await waitFor(() => expect(result.current.includeEntityText).toBe(true));
+    expect(fetchMock).toHaveBeenCalledWith("/enrichment-settings");
+  });
+
+  it("PATCHes on set", async () => {
+    fetchMock.mockResolvedValue({ include_entity_text: false });
+    const { result } = renderHook(() => useEnrichmentSettings(), { wrapper });
+    act(() => result.current.setIncludeEntityText(true));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/enrichment-settings",
+        expect.objectContaining({ method: "PATCH", body: JSON.stringify({ include_entity_text: true }) }),
+      ),
+    );
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify fail** — `cd services/web && pnpm exec vitest run hooks/use-enrichment-settings.test.tsx` → FAIL (hook not defined).
+
+- [ ] **Step 3: Implement the hook** `services/web/hooks/use-enrichment-settings.ts`:
+```ts
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchKeldApi } from "@/lib/api";
+
+export interface EnrichmentSettings {
+  include_entity_text: boolean;
+}
+
+/** Org enrichment settings over /api/enrichment-settings (admin GET/PATCH). */
+export function useEnrichmentSettings() {
+  const qc = useQueryClient();
+  const qk = ["enrichment-settings"];
+  const query = useQuery<EnrichmentSettings>({
+    queryKey: qk,
+    queryFn: () => fetchKeldApi("/enrichment-settings"),
+  });
+  const mut = useMutation({
+    mutationFn: (v: EnrichmentSettings) =>
+      fetchKeldApi<EnrichmentSettings>("/enrichment-settings", {
+        method: "PATCH",
+        body: JSON.stringify(v),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk }),
+  });
+  return {
+    includeEntityText: query.data?.include_entity_text ?? false,
+    isSaving: mut.isPending,
+    setIncludeEntityText: (v: boolean) => mut.mutate({ include_entity_text: v }),
+  };
+}
+```
+
+- [ ] **Step 4: Run to verify the hook test passes** — `cd services/web && pnpm exec vitest run hooks/use-enrichment-settings.test.tsx` → 2 passed.
+
+- [ ] **Step 5: Implement the section component** `services/web/components/settings/enrichment-settings-section.tsx` (mirror the toggle-row style from `invite-drawer.tsx`; label left, `Switch` right):
+```tsx
+"use client";
+
+import { Switch } from "@heroui/react/switch";
+import { useEnrichmentSettings } from "@/hooks/use-enrichment-settings";
+
+export function EnrichmentSettingsSection() {
+  const { includeEntityText, isSaving, setIncludeEntityText } = useEnrichmentSettings();
+  return (
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-sm font-medium text-keld-text-primary">Enrichment</h2>
+        <p className="text-xs text-keld-text-muted">
+          Controls what running keld-agent daemons send to Atlas. Applies org-wide within ~5 minutes.
+        </p>
+      </div>
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-keld-border bg-keld-bg/40 px-3 py-2">
+        <span className="flex min-w-0 flex-col">
+          <span className="text-sm text-keld-text-primary">Include entity text</span>
+          <span className="text-xs text-keld-text-muted">
+            Send domain-entity surface text to Atlas (default off; sensitive spans are always masked regardless).
+          </span>
+        </span>
+        <Switch
+          size="sm"
+          isSelected={includeEntityText}
+          isDisabled={isSaving}
+          onChange={setIncludeEntityText}
+          aria-label="Include entity text"
+        >
+          <Switch.Control>
+            <Switch.Thumb />
+          </Switch.Control>
+        </Switch>
+      </div>
+    </section>
+  );
+}
+```
+
+- [ ] **Step 6: Wire the section into the settings page** `services/web/app/(app)/admin/settings/page.tsx` — replace the `ComingSoon` stub. First glance at `services/web/app/(app)/admin/teams/page.tsx` (or `integrations/page.tsx`) for the house heading/container style and match it; a minimal version:
+```tsx
+import { EnrichmentSettingsSection } from "@/components/settings/enrichment-settings-section";
+
+export default function Page() {
+  return (
+    <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
+      <h1 className="text-lg font-semibold text-keld-text-primary">Settings</h1>
+      <EnrichmentSettingsSection />
+    </div>
+  );
+}
+```
+(The page stays a server component; `EnrichmentSettingsSection` is the `"use client"` island. Match the actual container/heading classes used by the sibling admin pages if they differ.)
+
+- [ ] **Step 7: Verify the full web suite is green + lint/typecheck** —
+```bash
+cd services/web && pnpm exec vitest run
+pnpm exec tsc --noEmit
+pnpm exec eslint app/\(app\)/admin/settings/page.tsx components/settings/enrichment-settings-section.tsx hooks/use-enrichment-settings.ts
+```
+Expected: vitest all green (incl. the 2 new tests); tsc clean; eslint clean on the new/changed files.
+
+- [ ] **Step 8: Commit** (web files only):
+```bash
+git add services/web/hooks/use-enrichment-settings.ts services/web/hooks/use-enrichment-settings.test.tsx services/web/components/settings/enrichment-settings-section.tsx "services/web/app/(app)/admin/settings/page.tsx"
+git commit -m "feat(web): admin toggle for org include_entity_text"
+```
 
 ---
 
