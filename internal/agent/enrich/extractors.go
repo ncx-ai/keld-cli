@@ -15,7 +15,12 @@ func versioned(name string) string { return fmt.Sprintf("%s-v%d", name, SchemaVe
 
 // Wave1 returns the independent first-wave extractors.
 func Wave1() []Extractor {
-	return []Extractor{TaskTypeExtractor{}, SensitivityExtractor{}, DomainEntitiesExtractor{}}
+	return []Extractor{
+		TaskTypeExtractor{}, SensitivityExtractor{}, DomainEntitiesExtractor{},
+		passExtractor{Pass{Name: "activity_type", Labels: Activities}},
+		passExtractor{Pass{Name: "personal", Labels: Personal}},
+		passExtractor{Pass{Name: "function_guess", Labels: Functions}},
+	}
 }
 
 // --- task_type ---

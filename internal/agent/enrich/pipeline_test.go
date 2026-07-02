@@ -16,11 +16,24 @@ func TestRunProducesEnrichedProfile(t *testing.T) {
 	if p.SchemaVersion != SchemaVersion {
 		t.Fatalf("schema version not set")
 	}
-	if len(p.ExtractorVersions) != 3 {
-		t.Fatalf("want 3 extractor versions, got %d", len(p.ExtractorVersions))
+	if len(p.ExtractorVersions) != 6 {
+		t.Fatalf("want 6 extractor versions, got %d", len(p.ExtractorVersions))
 	}
 	if p.EnrichedAt.IsZero() {
 		t.Fatal("EnrichedAt must be set")
+	}
+}
+
+func TestProfileHasActivityAndFunctionGuess(t *testing.T) {
+	p := Run("write a python function to sort a list", "eval", Meta{}, NewDeterministic())
+	if p.Activity.Value == "" {
+		t.Error("expected an activity_type")
+	}
+	if p.FunctionGuess.Value == "" {
+		t.Error("expected a function_guess")
+	}
+	if p.Personal.Value == "" {
+		t.Error("expected a personal label")
 	}
 }
 

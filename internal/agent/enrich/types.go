@@ -48,6 +48,11 @@ type Profile struct {
 	Entities          []Entity          `json:"entities,omitempty"`
 	Sensitivity       Labeled           `json:"sensitivity"`
 	SensitivitySpans  []Entity          `json:"sensitivity_spans,omitempty"`
+	Activity          Labeled           `json:"activity_type"`
+	Personal          Labeled           `json:"personal"`
+	FunctionGuess     Labeled           `json:"function_guess"`
+	Subcategory       Labeled           `json:"subcategory"`
+	SubcategoryAlt    []Labeled         `json:"subcategory_alt,omitempty"`
 	PipelineStatus    string            `json:"pipeline_status"`
 	ExtractorVersions map[string]string `json:"extractor_versions"`
 	SchemaVersion     int               `json:"schema_version"`
